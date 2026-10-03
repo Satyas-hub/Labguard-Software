@@ -1,0 +1,50 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: labguard-backend
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/labguard}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 30000
+      connection-timeout: 20000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+# LabGuard Security & JWT Configuration
+labguard:
+  jwt:
+    # 256-bit secure secret key
+    secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    expiration-ms: 86400000 # 24 hours
+    cookie-name: labguard_token
+    cookie-secure: false # set true in production with HTTPS
+    cookie-same-site: Lax
+  client:
+    # Device registration shared token for PC kiosk provisioning
+    device-registration-secret: ${DEVICE_SECRET:labguard-provision-device-sec-99}
+  notifications:
+    dedup-cooldown-seconds: 15
+
+# Logging configuration
+logging:
+  level:
+    root: INFO
+    com.labguard: DEBUG
+    org.springframework.security: INFO

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LABGUARD",
+  "version": "3.5.1",
+  "identifier": "edu.labguard.system",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LABGUARD",
+        "width": 1240,
+        "height": 820,
+        "minWidth": 400,
+        "minHeight": 500,
+        "center": true,
+        "decorations": false,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "publisher": "LABGUARD Institutional Engineering",
+    "shortDescription": "Centralized Computer Lab Access, Monitoring & Equipment Management",
+    "longDescription": "Centralized, role-based native Windows computer laboratory access, monitoring, equipment accountability, notification, and offline-first management platform for educational institutions."
+  }
+}

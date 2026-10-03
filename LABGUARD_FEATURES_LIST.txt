@@ -1,0 +1,123 @@
+================================================================================
+                           LABGUARD v2.5.0 - COMPLETE FEATURES LIST
+================================================================================
+
+1. CORE SYSTEM ARCHITECTURE & PLATFORM
+--------------------------------------------------------------------------------
+• Native Windows Desktop Application built with Tauri 2, React 18, TypeScript, Tailwind CSS, and Rust.
+• Central Backend REST API & WebSocket Server built with Node.js, Express, TypeScript, and PostgreSQL / Supabase.
+• Offline-First Architecture with a 14-table local SQLite database (%ProgramData%\LABGUARD\database\labguard.db).
+• Bi-Directional Offline Sync Engine with idempotent queueing, conflict resolution, and automatic cloud retry.
+• Enterprise Windows Inno Setup Installer (LABGUARD-Setup.exe) with automated directory provisioning (database, sync, logs, evidence, config).
+• Auto-Boot Login Gate & Terminal Lockdown on Windows workstation startup.
+• 1366x768 Lab Monitor Screen Optimization for zero-scroll workstation accessibility.
+
+2. AUTHENTICATION, SECURITY & HARDWARE GATE
+--------------------------------------------------------------------------------
+• 4-Role RBAC (Role-Based Access Control): ADMIN, FACULTY, LAB_ASSISTANT, STUDENT.
+• Dual-token JWT Authentication (8h Access Token + 7d Refresh Token) with token rotation.
+• Bcrypt password encryption with 10 salt rounds.
+• Brute-Force Rate Limiting (HTTP 429 Lockout after 5 consecutive failed attempts).
+• Offline Authentication via cached salted hashes in local SQLite database.
+• Active Account Status Verification (immediate lockout for disabled accounts).
+• Hardware Peripheral Telemetry Gate (monitors keyboard, mouse, and display connectivity before login).
+• Workstation Identity Node Binding (LAB_ID, PC_ID, CLIENT_ID) with duplicate prevention.
+• Unregistered Workstation Lock Screen blocking unauthorized or unprovisioned lab computers.
+• Student Safe Auto-Shutdown on session logout via native Rust / Win32 (shutdown /s /t 10).
+• Staff Role Shutdown Bypass (Faculty, Assistants, and Admins can log out without turning off PC).
+
+3. ADMINISTRATOR MODULE (ADMIN COMMAND CENTER)
+--------------------------------------------------------------------------------
+[A] Overview & Executive Dashboard:
+    - Real-time system metrics (Students, Faculty, Lab Assistants, Labs, Computers, Equipment, Active Sessions, Open Issues, Online/Offline Clients).
+    - Dynamic fleet utilization and laboratory status rollups.
+    - System health monitoring with instant refresh.
+
+[B] People Management (User Directory & Provisioning):
+    - Enterprise 2-Column User Provisioning & Edit Modal:
+      * Column 1: Role, Full Legal Name, Roll No / Staff ID, Gender, Email, Phone, DOB, Password.
+      * Column 2: Department, Course, Year, Semester, Section, Academic Year, and Assigned Labs.
+    - Multi-field Live Search (Name, Roll Number, Email, Department).
+    - Role Filtering Chips (ALL, STUDENT, FACULTY, LAB_ASSISTANT, ADMIN).
+    - Server-side Pagination & Sortable User Roster.
+    - Account Enable / Disable Status Toggle with Root Administrator Protection.
+    - Secure Password Reset & User Deletion with dependency validation.
+
+[C] Academic Management & Curriculum Structure (4 Sub-Tabs):
+    - Departments & Courses: Dual-panel CRUD for institutional departments and degree programs.
+    - Subjects & Curriculum: Course-linked subject management with subject codes and credits.
+    - Academic Class Offerings: Class creation linking department, course, year, semester, section, subject, and faculty.
+    - Academic Calendar & Sections: Management of active academic years, terms, and sections.
+    - Relational Dependency Guards preventing accidental deletion of referenced academic entities.
+
+[D] Laboratories & Workstation Fleet Management:
+    - Facilities Directory: CRUD for Lab Rooms (Code, Name, Location, Seating Capacity, Status).
+    - Workstation Fleet Explorer: Grid view of all PCs across labs with live telemetry badges.
+    - Workstation Lifecycle State Machine: AVAILABLE, IN_USE, MAINTENANCE, DISABLED, OFFLINE, UNREGISTERED.
+    - Workstation Remote Actions: Disable PC, Place in Maintenance, Unbind Client ID, Force Terminate Active Session.
+    - Terminal Identity Re-binding (bind new client hardware UUID to existing physical PC code).
+
+[E] Equipment & Peripheral Accountability:
+    - Complete Asset Inventory Hierarchy: LAB -> COMPUTER -> EQUIPMENT.
+    - Asset Tag uniqueness enforcement across campus.
+    - Status Tracking: FUNCTIONAL, FAULTY, MAINTENANCE, DECOMMISSIONED, AVAILABLE, IN_USE.
+    - Workstation Assignment & Unassignment to Lab Spare Pool.
+    - Atomic Defective-to-Spare Replacement Workflow (swaps broken part with working spare and logs audit trail).
+    - Active Session Deletion Protection (prevents removing equipment in active use).
+
+[F] Student Enrollment Workspace:
+    - Policy Engine: DIRECT enrollment vs APPROVAL_REQUIRED review workflows.
+    - Enrollment Requests Triage: Filter by PENDING, APPROVED, REJECTED with full review & notes modal.
+    - Class Rosters & Capacity Meters: Live enrollment counts vs seat limits with unenroll actions.
+    - Registered Student Directory with fast enrollment triggers.
+
+[G] Audit Logs & System Settings:
+    - Immutable System Audit Trail recording every admin action, session event, and security alert.
+    - Multi-criteria filtering by Action Type, Severity, Date, and User.
+    - PC Identity & Workstation configuration tools.
+    - Application Version & System Update management (SHA-256 verification).
+
+4. FACULTY MODULE (ACADEMIC COMMAND CENTER)
+--------------------------------------------------------------------------------
+• Faculty Dashboard: Quick summary of Assigned Classes, Enrolled Students, Authorized Labs, and Active Lab Sessions.
+• My Classes & Roster Explorer: View allocated classes, syllabus subjects, student rosters, and class capacities.
+• Student Enrollment Tools:
+  - Mode 1: Search & enroll existing students into faculty's classes.
+  - Mode 2: Provision and enroll new students directly.
+• My Assigned Laboratories: View authorized lab facilities and schedule assignments.
+• Live Lab Monitor: Interactive workstation grid displaying real-time occupancy, active student name, elapsed session timer, and hardware status dots.
+• Historical Session Records: Searchable session logs of all student logins in faculty's assigned classes.
+• Lab Issues & Grievance Reporting: View reported lab issues and submit hardware/software tickets.
+• Faculty Profile & Scope: Scoped strictly to faculty's own classes, departments, and assigned labs.
+
+5. LAB ASSISTANT MODULE (OPERATIONAL COMMAND CENTER)
+--------------------------------------------------------------------------------
+• Operational Dashboard: Real-time lab occupancy percentage, active attendance count, open maintenance orders, and unacknowledged hardware alerts.
+• Live Workstation Fleet Management: Visual PC grid with one-click state transitions (Available, Maintenance, Disabled) and remote session termination.
+• Live Attendance Roster ("Who's In / Who's Out"): Real-time attendance log tracking active student sessions, start times, and seat locations.
+• Physical Equipment & Spares Inventory: View all peripherals assigned to PCs and spare inventory in the lab.
+• Atomic Defective-to-Spare Replacement Modal: Instantly replace faulty keyboards/mice/monitors with lab spares.
+• Real-time Hardware Telemetry Events: Live feed of peripheral unplug/plug events and port mismatches with one-click acknowledgment.
+• Issues Triage & Maintenance Work Orders: Create, assign, track, and close maintenance work orders (Schedule -> In Progress -> Repaired -> Verified -> Closed).
+• Assigned Facilities View: Quick switching between multiple assigned lab rooms.
+
+6. STUDENT MODULE (LAB WORKSTATION TERMINAL)
+--------------------------------------------------------------------------------
+• Student Terminal Dashboard: Clean interface displaying current logged-in student info, assigned class, subject, lab room, and PC number.
+• Live Session Elapsed Timer: Real-time session ticker tracking total lab usage time.
+• Compact Floating HUD Mode: Minimized floating HUD widget allowing students full screen workspace while keeping session time and status accessible.
+• Peripheral Health Indicators: Live visual confirmation of Keyboard, Mouse, and Monitor connectivity.
+• Issue & Defect Reporting: Form to report malfunctioning peripherals, network issues, or software problems with instant notification to the Lab Assistant.
+• One-Click Safe End Session & Auto-Shutdown: Clicking "End Session" securely closes the session, syncs logs, and triggers a safe 10-second Windows computer shutdown.
+
+7. BACKGROUND SERVICES, TELEMETRY & REPORTING
+--------------------------------------------------------------------------------
+• Real-time Client Heartbeat Telemetry (POST /api/clients/heartbeat) monitoring CPU, memory, disk, and peripheral health.
+• Stale Client Auto-Detection: Automatically flags workstations without heartbeat in >90 seconds as OFFLINE.
+• Real-time WebSocket Push Engine (ws://localhost:5000/ws) powering instant live lab grid and attendance updates.
+• Crash Recovery Engine: Restores interrupted student sessions and sync state upon unexpected system restarts.
+• Comprehensive Data Exporting: Export attendance reports, workstation logs, and equipment lists to CSV, JSON, and PDF formats.
+
+================================================================================
+                           END OF LABGUARD FEATURES LIST
+================================================================================

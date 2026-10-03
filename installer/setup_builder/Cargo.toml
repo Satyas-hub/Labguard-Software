@@ -1,0 +1,6 @@
+[package]
+name = "labguard-setup"
+version = "2.5.1"
+edition = "2021"
+
+[dependencies]

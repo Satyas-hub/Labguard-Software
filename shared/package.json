@@ -1,0 +1,8 @@
+{
+  "name": "@labguard/shared",
+  "version": "2.5.1",
+  "description": "LABGUARD V2 Universal Domain Types and Schemas",
+  "main": "types/index.ts",
+  "types": "types/index.ts",
+  "private": true
+}

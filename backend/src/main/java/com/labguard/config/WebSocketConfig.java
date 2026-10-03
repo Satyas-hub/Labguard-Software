@@ -1,0 +1,21 @@
+package com.labguard.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.socket.config.annotation.*;
+
+@Configuration
+@EnableWebSocket
+public class WebSocketConfig implements WebSocketConfigurer {
+
+    private final RealtimeWebSocketHandler realtimeWebSocketHandler;
+
+    public WebSocketConfig(RealtimeWebSocketHandler realtimeWebSocketHandler) {
+        this.realtimeWebSocketHandler = realtimeWebSocketHandler;
+    }
+
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        registry.addHandler(realtimeWebSocketHandler, "/ws/events")
+            .setAllowedOrigins("*");
+    }
+}
