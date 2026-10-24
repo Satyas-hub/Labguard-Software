@@ -1,8 +1,8 @@
 # LABGUARD Windows PC Client Documentation
 
-> **Technology Stack:** C#, .NET 8, Windows Presentation Foundation (WPF), WMI, Win32 Device Notification Hooks.
+> **Technology Stack:** Tauri 2, Rust 2021, React 18, TypeScript, Tailwind CSS, Win32 API (`windows` crate), SQLite (`rusqlite`).
 
-The **LabGuard Client** is an institutional workstation application designed to run on physical laboratory PCs. It ensures continuous equipment accountability, managed access control, and user session monitoring without relying on trivial browser fullscreen tricks.
+The **LABGUARD Client** is an institutional workstation application designed to run on physical laboratory PCs. It ensures continuous equipment accountability, managed access control, and user session monitoring without relying on trivial browser fullscreen tricks.
 
 ---
 

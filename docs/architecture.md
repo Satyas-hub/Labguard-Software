@@ -16,26 +16,31 @@ LABGUARD operates as a secure, distributed multi-tier system composed of four ma
                                        │
                                        ▼
                   ┌─────────────────────────────────────────┐
+                  │     Physical Laboratory Workstations    │
+                  └────────────────────┬────────────────────┘
+                                       │
+                                       ▼
+                  ┌─────────────────────────────────────────┐
                   │     LABGUARD Native System Application  │
-                  │     (.NET 8, WPF, MVVM, Win32/WMI)      │
+                  │     (Tauri 2, React 18, Rust, Win32)    │
                   │     - Offline-First Local SQLite DB     │
                   │     - Kiosk & USB Peripheral Monitor    │
                   │     - Student Auto-Shutdown Manager     │
                   └────────────────────┬────────────────────┘
                                        │
-                                       ▼ HTTPS (REST API & Batch Sync)
+                                       ▼ HTTP & WebSocket (Port 5000)
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       Java Spring Boot 3 Backend API                         │
-│  - Spring Security 6 (Stateless JWT + Strict RBAC LabSecurityEvaluator)      │
-│  - REST Controllers (Labs, PCs, Equipment, Sessions, Issues, Notifications) │
-│  - Idempotent Sync Batch API & WebSocket Real-time Dispatcher               │
+│                       Node.js + Express Central API                         │
+│  - JWT Authentication + Scoped RBAC Route Guards                            │
+│  - REST Controllers (Labs, PCs, Equipment, Sessions, Issues, Academic)     │
+│  - Idempotent Sync Batch API & WebSocket Real-time Telemetry Dispatcher     │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
-                                       ▼
+                                       ▼ PostgreSQL Connection Pool
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Central PostgreSQL Database                       │
+│                     Central PostgreSQL Database (Supabase)                  │
 │  - Normalized Tables (UUIDs, Foreign Keys, Performance Indexes)             │
-│  - user_lab_assignments Table for Dynamic Laboratory Isolation               │
+│  - Multi-Department & Multi-Laboratory Academic Scoping                     │
 │  - Central Audit Logs & Global History                                      │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -58,15 +63,13 @@ The platform enforces strictly **FOUR** application roles:
 ## 3. Monorepo Organization
 
 ```
-LABGUARD/
-├── frontend/             # Next.js 14/15 App Router, Tailwind CSS, Lucide, Recharts
-├── backend/              # Java 17, Spring Boot 3.3, Spring Security 6, WebSocket
-├── windows-client/       # C# .NET 8 WPF Application for physical workstation kiosk
-├── database/             # PostgreSQL migrations and seed scripts
-│   ├── migrations/       # 01_initial_schema.sql, 02_indexes_and_rls.sql
-│   └── seed/             # 01_seed_data.sql (7 Labs, 70+ PCs, 140+ peripherals, users)
-├── docs/                 # Exhaustive technical documentation
-└── scripts/              # Docker Compose, PowerShell, and Bash deployment automation
+Labguard-Software/
+├── desktop/              # Tauri 2 (Rust) + React 18 + Tailwind CSS Desktop Client
+├── backend/              # Node.js 20+, Express 4, TypeScript, WebSocket server
+├── database/             # PostgreSQL migrations (Supabase) and seed scripts
+├── installer/            # Inno Setup Windows installer scripts & PowerShell automation
+├── shared/               # Shared TypeScript data models and enums
+└── docs/                 # Exhaustive technical documentation
 ```
 
 ---
