@@ -155,11 +155,7 @@ const MainRouter: React.FC = () => {
 
     const sendHeartbeat = async () => {
       try {
-        let hwStatus = { keyboard_connected: true, mouse_connected: true, monitor_connected: true };
-        if ((window as any).__TAURI_INTERNALS__) {
-          const { invoke } = await import('@tauri-apps/api/core');
-          hwStatus = await invoke('get_hardware_status');
-        }
+        const hwStatus = PeripheralScanner.getStatus();
 
         const res = await ApiClient.request('/clients/heartbeat', {
           method: 'POST',

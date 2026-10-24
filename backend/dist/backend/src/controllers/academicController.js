@@ -61,6 +61,8 @@ const bootstrapAcademicData = async () => {
                 const deptsStore = pool_1.db.getStore('departments');
                 deptsStore.length = 0;
                 for (const d of supaDepts) {
+                    if (pool_1.db.isDeleted(d.id))
+                        continue;
                     deptsStore.push({
                         id: d.id,
                         code: d.code,
@@ -74,6 +76,8 @@ const bootstrapAcademicData = async () => {
                     const coursesStore = pool_1.db.getStore('courses');
                     coursesStore.length = 0;
                     for (const c of supaCourses) {
+                        if (pool_1.db.isDeleted(c.id))
+                            continue;
                         const deptObj = deptsStore.find(x => x.id === c.department_id);
                         coursesStore.push({
                             id: c.id,
@@ -91,6 +95,8 @@ const bootstrapAcademicData = async () => {
                     const subsStore = pool_1.db.getStore('subjects');
                     subsStore.length = 0;
                     for (const s of supaSubs) {
+                        if (pool_1.db.isDeleted(s.id))
+                            continue;
                         const deptObj = deptsStore.find(x => x.code === s.department);
                         subsStore.push({
                             id: s.id,
@@ -110,6 +116,8 @@ const bootstrapAcademicData = async () => {
                     const yearsStore = pool_1.db.getStore('academic_years');
                     yearsStore.length = 0;
                     for (const y of supaYears) {
+                        if (pool_1.db.isDeleted(y.id))
+                            continue;
                         yearsStore.push({
                             id: y.id,
                             year: y.year_code,
@@ -390,6 +398,8 @@ const deleteDepartment = async (req, res) => {
     if (index !== -1) {
         depts.splice(index, 1);
     }
+    pool_1.db.recordDeletion(id, 'DEPARTMENT', { code: dept.code });
+    pool_1.db.flush();
     // Remove from Supabase Cloud
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
@@ -587,6 +597,8 @@ const deleteCourse = async (req, res) => {
     const index = courses.findIndex((c) => c.id === id);
     if (index !== -1)
         courses.splice(index, 1);
+    pool_1.db.recordDeletion(id, 'COURSE', { code: course.code });
+    pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
@@ -780,6 +792,8 @@ const deleteSubject = async (req, res) => {
     const index = subjects.findIndex((s) => s.id === id);
     if (index !== -1)
         subjects.splice(index, 1);
+    pool_1.db.recordDeletion(id, 'SUBJECT', { code: subject.code });
+    pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
@@ -926,6 +940,8 @@ const deleteAcademicYear = async (req, res) => {
     const index = years.findIndex((item) => item.id === id);
     if (index !== -1)
         years.splice(index, 1);
+    pool_1.db.recordDeletion(id, 'ACADEMIC_YEAR', { year: y.year });
+    pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
@@ -1017,6 +1033,8 @@ const deleteSection = async (req, res) => {
     const index = sections.findIndex((s) => s.id === id);
     if (index !== -1)
         sections.splice(index, 1);
+    pool_1.db.recordDeletion(id, 'SECTION', { name: section.name });
+    pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
@@ -1283,14 +1301,14 @@ const updateClass = async (req, res) => {
 exports.updateClass = updateClass;
 const deleteClass = async (req, res) => {
     const { id } = req.params;
+    hasBootstrappedAcademic = true;
     const cl = pool_1.db.findOne('classes', (item) => item.id === id);
     if (!cl) {
         return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Class offering not found' });
     }
-    const classes = pool_1.db.getStore('classes');
-    const index = classes.findIndex((item) => item.id === id);
-    if (index !== -1)
-        classes.splice(index, 1);
+    pool_1.db.delete('classes', (item) => item.id === id);
+    pool_1.db.recordDeletion(id, 'CLASS', { name: cl.name });
+    pool_1.db.flush();
     // Cascade delete in-memory class student assignments
     pool_1.db.delete('class_students', (cs) => cs.classId === id);
     const sb = (0, supabaseSyncHelper_1.getSupabase)();

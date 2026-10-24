@@ -514,11 +514,10 @@ const deleteEquipment = async (req, res) => {
             });
         }
     }
-    const items = pool_1.db.getStore('equipment');
-    const index = items.findIndex((e) => e.id === item.id);
-    if (index !== -1) {
-        items.splice(index, 1);
-    }
+    // Remove equipment permanently from store
+    pool_1.db.delete('equipment', (e) => e.id === item.id);
+    pool_1.db.recordDeletion(item.id, 'EQUIPMENT', { assetTag: item.assetTag });
+    pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {

@@ -607,11 +607,10 @@ export const deleteEquipment = async (req: AuthenticatedRequest, res: Response) 
     }
   }
 
-  const items = db.getStore('equipment');
-  const index = items.findIndex((e: Equipment) => e.id === item.id);
-  if (index !== -1) {
-    items.splice(index, 1);
-  }
+  // Remove equipment permanently from store
+  db.delete('equipment', (e: Equipment) => e.id === item.id);
+  db.recordDeletion(item.id, 'EQUIPMENT', { assetTag: item.assetTag });
+  db.flush();
 
   const sb = getSupabase();
   if (sb) {

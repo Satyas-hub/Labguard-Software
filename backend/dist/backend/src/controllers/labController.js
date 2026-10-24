@@ -178,100 +178,97 @@ const ensureLabsSeeded = async () => {
     }
 };
 exports.ensureLabsSeeded = ensureLabsSeeded;
-/**
- * GET /api/system/peripherals
- * Live detection of hardware peripherals directly from Windows Device Manager (PnP)
- */
-const getSystemPeripherals = async (_req, res) => {
-    if (process.platform !== 'win32') {
-        return res.json({
-            success: true,
-            data: {
-                keyboard_connected: true,
-                mouse_connected: true,
-                monitor_connected: true,
-                keyboard_name: 'Standard Keyboard',
-                mouse_name: 'Standard Mouse',
-                monitor_name: 'Display Monitor',
-                timestamp: new Date().toISOString()
-            }
-        });
-    }
-    try {
-        const psCmd = `@(Get-PnpDevice -PresentOnly -Class Keyboard, Mouse, Monitor -ErrorAction SilentlyContinue | Select-Object Class, FriendlyName, Status) | ConvertTo-Json -Compress`;
-        (0, child_process_1.exec)(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "${psCmd}"`, { timeout: 4000 }, (err, stdout) => {
-            let keyboard_connected = false;
-            let keyboard_name = 'Not Detected';
-            let mouse_connected = false;
-            let mouse_name = 'Not Detected';
-            let monitor_connected = false;
-            let monitor_name = 'Not Detected';
-            if (!err && stdout && stdout.trim()) {
-                try {
-                    const raw = stdout.trim();
-                    const parsed = JSON.parse(raw);
-                    const devices = Array.isArray(parsed) ? parsed : [parsed];
-                    for (const dev of devices) {
-                        const cls = String(dev.Class || '').toLowerCase();
-                        const name = String(dev.FriendlyName || '').trim();
-                        const status = String(dev.Status || '').toUpperCase();
-                        const isOk = status === 'OK';
-                        if (cls === 'keyboard' && isOk) {
-                            keyboard_connected = true;
-                            if (keyboard_name === 'Not Detected' || keyboard_name.toLowerCase().includes('standard ps/2')) {
-                                keyboard_name = name || 'Standard Keyboard';
-                            }
+// ============================================================================
+// High-Speed Windows Peripheral Telemetry Cache
+// Maintains real-time hardware status in memory; responds in <1ms without blocking
+// ============================================================================
+let cachedPeripherals = {
+    keyboard_connected: true,
+    mouse_connected: true,
+    monitor_connected: true,
+    keyboard_name: 'Standard USB Keyboard',
+    mouse_name: 'Optical Pointing Device',
+    monitor_name: 'Primary Workstation Display',
+    timestamp: new Date().toISOString()
+};
+let isScanningPeripherals = false;
+let lastPeripheralScanTicks = 0;
+function refreshPeripheralsCache() {
+    if (process.platform !== 'win32' || isScanningPeripherals)
+        return;
+    const now = Date.now();
+    if (now - lastPeripheralScanTicks < 1500)
+        return;
+    isScanningPeripherals = true;
+    const psCmd = `@(Get-PnpDevice -PresentOnly -Class Keyboard, Mouse, Monitor -ErrorAction SilentlyContinue | Select-Object Class, FriendlyName, Status) | ConvertTo-Json -Compress`;
+    (0, child_process_1.exec)(`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "${psCmd}"`, { timeout: 3500 }, (err, stdout) => {
+        isScanningPeripherals = false;
+        lastPeripheralScanTicks = Date.now();
+        if (!err && stdout && stdout.trim()) {
+            try {
+                const parsed = JSON.parse(stdout.trim());
+                const devices = Array.isArray(parsed) ? parsed : [parsed];
+                let kbOk = false, msOk = false, monOk = false;
+                let kbName = 'Not Detected', msName = 'Not Detected', monName = 'Not Detected';
+                for (const dev of devices) {
+                    const cls = String(dev.Class || '').toLowerCase();
+                    const name = String(dev.FriendlyName || '').trim();
+                    const isOk = String(dev.Status || '').toUpperCase() === 'OK';
+                    if (cls === 'keyboard' && isOk) {
+                        kbOk = true;
+                        if (kbName === 'Not Detected' || kbName.toLowerCase().includes('standard ps/2')) {
+                            kbName = name || 'Standard USB Keyboard';
                         }
-                        else if (cls === 'mouse' && isOk) {
-                            mouse_connected = true;
-                            if (mouse_name === 'Not Detected' || mouse_name.toLowerCase().includes('hid-compliant')) {
-                                mouse_name = name || 'Pointing Device';
-                            }
+                    }
+                    else if (cls === 'mouse' && isOk) {
+                        msOk = true;
+                        if (msName === 'Not Detected' || msName.toLowerCase().includes('hid-compliant')) {
+                            msName = name || 'Optical Pointing Device';
                         }
-                        else if (cls === 'monitor' && isOk) {
-                            monitor_connected = true;
-                            if (monitor_name === 'Not Detected' || monitor_name.toLowerCase().includes('generic')) {
-                                monitor_name = name || 'Display Monitor';
-                            }
+                    }
+                    else if (cls === 'monitor' && isOk) {
+                        monOk = true;
+                        if (monName === 'Not Detected' || monName.toLowerCase().includes('generic')) {
+                            monName = name || 'Primary Workstation Display';
                         }
                     }
                 }
-                catch {
-                    // Silently fall through
+                if (!monOk) {
+                    monOk = true;
+                    monName = 'Primary Workstation Display';
                 }
-            }
-            if (!monitor_connected) {
-                monitor_connected = true;
-                monitor_name = 'Primary Workstation Display';
-            }
-            return res.json({
-                success: true,
-                data: {
-                    keyboard_connected,
-                    mouse_connected,
-                    monitor_connected,
-                    keyboard_name,
-                    mouse_name,
-                    monitor_name,
+                cachedPeripherals = {
+                    keyboard_connected: kbOk,
+                    mouse_connected: msOk,
+                    monitor_connected: monOk,
+                    keyboard_name: kbName,
+                    mouse_name: msName,
+                    monitor_name: monName,
                     timestamp: new Date().toISOString()
-                }
-            });
-        });
-    }
-    catch (e) {
-        return res.json({
-            success: true,
-            data: {
-                keyboard_connected: true,
-                mouse_connected: true,
-                monitor_connected: true,
-                keyboard_name: 'Windows Keyboard',
-                mouse_name: 'Windows Pointing Device',
-                monitor_name: 'Display Monitor',
-                timestamp: new Date().toISOString()
+                };
             }
-        });
-    }
+            catch { }
+        }
+    });
+}
+// Kick off initial background scan
+if (process.platform === 'win32') {
+    refreshPeripheralsCache();
+    setInterval(refreshPeripheralsCache, 2000);
+}
+/**
+ * GET /api/system/peripherals
+ * High-speed live detection of hardware peripherals; instantaneous (<1ms) response
+ */
+const getSystemPeripherals = async (_req, res) => {
+    refreshPeripheralsCache();
+    return res.json({
+        success: true,
+        data: {
+            ...cachedPeripherals,
+            timestamp: new Date().toISOString()
+        }
+    });
 };
 exports.getSystemPeripherals = getSystemPeripherals;
 /**
@@ -704,12 +701,10 @@ const deleteLab = async (req, res) => {
             }
         });
     }
-    // Safe to delete
-    const labsStore = pool_1.db.getStore('labs');
-    const index = labsStore.findIndex((l) => l.id === lab.id);
-    if (index !== -1) {
-        labsStore.splice(index, 1);
-    }
+    // Safe to delete - permanently remove from store
+    pool_1.db.delete('labs', (l) => l.id === lab.id);
+    pool_1.db.recordDeletion(lab.id, 'LAB', { code: lab.code, name: lab.name });
+    pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
@@ -720,6 +715,10 @@ const deleteLab = async (req, res) => {
             console.warn('[Labs Supabase] Delete error:', err.message);
         }
     }
+    try {
+        realtimeService_1.RealtimeService.broadcast('LAB_DELETED', { id: lab.id, code: lab.code });
+    }
+    catch { }
     // Remove lab references from users' assignedLabs
     const users = pool_1.db.getStore('users');
     for (const u of users) {
@@ -1275,12 +1274,10 @@ const deleteComputer = async (req, res) => {
             e.updatedAt = new Date().toISOString();
         }
     }
-    // Remove pc
-    const pcs = pool_1.db.getStore('computers');
-    const index = pcs.findIndex((c) => c.id === pc.id);
-    if (index !== -1) {
-        pcs.splice(index, 1);
-    }
+    // Remove pc permanently from store
+    pool_1.db.delete('computers', (c) => c.id === pc.id);
+    pool_1.db.recordDeletion(pc.id, 'COMPUTER', { pcCode: pc.pcCode, labCode: pc.labCode });
+    pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
@@ -1290,6 +1287,10 @@ const deleteComputer = async (req, res) => {
             console.warn('[Computers Supabase] Delete error:', e.message);
         }
     }
+    try {
+        realtimeService_1.RealtimeService.broadcast('COMPUTER_DELETED', { id: pc.id, pcCode: pc.pcCode });
+    }
+    catch { }
     // Update lab pcCount
     if (pc.labCode) {
         const lab = pool_1.db.findOne('labs', (l) => l.code.toUpperCase() === pc.labCode?.toUpperCase());

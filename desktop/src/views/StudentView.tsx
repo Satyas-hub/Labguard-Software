@@ -28,6 +28,8 @@ import {
   BookOpen
 } from 'lucide-react';
 import { Equipment, Session, Issue } from '../../../shared/types';
+import { PeripheralScanner } from '../services/peripheralScanner';
+import { NativeHardwareStatus } from '../services/native';
 
 export const StudentView: React.FC = () => {
   const { user, isOnline, pcIdentity, requestShutdown, abortShutdown, logout } = useAuth();
@@ -42,9 +44,19 @@ export const StudentView: React.FC = () => {
   const [dashboardData, setDashboardData] = useState<any | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [workstationEquipment, setWorkstationEquipment] = useState<Equipment[]>([]);
+  const [hwStatus, setHwStatus] = useState<NativeHardwareStatus>(PeripheralScanner.getStatus());
   const [myIssues, setMyIssues] = useState<Issue[]>([]);
   const [sessionHistory, setSessionHistory] = useState<Session[]>([]);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const unsub = PeripheralScanner.subscribe((status) => {
+      setHwStatus(status);
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
 
   // End session & shutdown confirmation modal
   const [showEndModal, setShowEndModal] = useState(false);
@@ -534,26 +546,28 @@ export const StudentView: React.FC = () => {
                   Verified Hardware Environment &amp; Peripherals
                 </h3>
                 <span className="text-xs text-slate-500">
-                  {workstationEquipment.length} Physical Peripherals Monitored
+                  {workstationEquipment.length > 0 ? workstationEquipment.length : 3} Physical Peripherals Monitored
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {workstationEquipment.length === 0 ? (
                   <>
-                    {/* Default Peripherals fallback for visual reassurance */}
+                    {/* Live Physical Peripherals Detection */}
                     <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2 text-slate-700">
                           <Keyboard className="w-4 h-4 text-blue-600" />
                           <span className="text-xs font-bold uppercase tracking-wider">Keyboard</span>
                         </div>
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className={`w-2.5 h-2.5 rounded-full ${hwStatus.keyboard_connected ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'}`} />
                       </div>
-                      <p className="text-sm font-bold text-slate-900">Standard USB Keyboard</p>
-                      <p className="text-[11px] text-slate-500">Asset Tag: KB-001 • Dell Enterprise</p>
-                      <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">
-                        ✓ Verified &amp; Connected
+                      <p className="text-sm font-bold text-slate-900 truncate">{hwStatus.keyboard_name || 'Standard Keyboard'}</p>
+                      <p className="text-[11px] text-slate-500">Telemetry: Sub-second Hardware Poll</p>
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                        hwStatus.keyboard_connected ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                      }`}>
+                        {hwStatus.keyboard_connected ? '✓ Verified & Connected' : '⚠️ Disconnected / Missing'}
                       </span>
                     </div>
 
@@ -563,12 +577,14 @@ export const StudentView: React.FC = () => {
                           <Mouse className="w-4 h-4 text-blue-600" />
                           <span className="text-xs font-bold uppercase tracking-wider">Mouse</span>
                         </div>
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className={`w-2.5 h-2.5 rounded-full ${hwStatus.mouse_connected ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'}`} />
                       </div>
-                      <p className="text-sm font-bold text-slate-900">Optical USB Mouse</p>
-                      <p className="text-[11px] text-slate-500">Asset Tag: MS-001 • Dell Precision</p>
-                      <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">
-                        ✓ Verified &amp; Connected
+                      <p className="text-sm font-bold text-slate-900 truncate">{hwStatus.mouse_name || 'Pointing Device'}</p>
+                      <p className="text-[11px] text-slate-500">Telemetry: Sub-second Hardware Poll</p>
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                        hwStatus.mouse_connected ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                      }`}>
+                        {hwStatus.mouse_connected ? '✓ Verified & Connected' : '⚠️ Disconnected / Missing'}
                       </span>
                     </div>
 
@@ -578,12 +594,14 @@ export const StudentView: React.FC = () => {
                           <Monitor className="w-4 h-4 text-blue-600" />
                           <span className="text-xs font-bold uppercase tracking-wider">Display</span>
                         </div>
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className={`w-2.5 h-2.5 rounded-full ${hwStatus.monitor_connected ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'}`} />
                       </div>
-                      <p className="text-sm font-bold text-slate-900">Primary Display (1080p)</p>
-                      <p className="text-[11px] text-slate-500">Asset Tag: DSP-001 • HDMI Active</p>
-                      <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">
-                        ✓ Signal Stable
+                      <p className="text-sm font-bold text-slate-900 truncate">{hwStatus.monitor_name || 'Primary Display'}</p>
+                      <p className="text-[11px] text-slate-500">Telemetry: Win32 Display Bus</p>
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                        hwStatus.monitor_connected ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                      }`}>
+                        {hwStatus.monitor_connected ? '✓ Signal Active' : '⚠️ No Signal / Disconnected'}
                       </span>
                     </div>
                   </>

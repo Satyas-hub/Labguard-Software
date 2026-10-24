@@ -12,6 +12,7 @@ import { User, UserRole, AuthResponse } from '../../../shared/types';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { recordFailedLogin, clearFailedLogin } from '../middleware/rateLimit';
 import { getSupabase, isInstitutionBootstrapped } from '../db/supabaseSyncHelper';
+import { RealtimeService } from '../services/realtimeService';
 
 // Sync extended user metadata cache to Supabase system_settings
 export const syncExtendedUserCacheToSupabase = async () => {
@@ -79,126 +80,28 @@ const ensureBootstrapInstitutionalUsers = async () => {
     STUDENT: '10000000-0000-0000-0000-000000000004'
   };
 
-  // Only seed default demo users on initial installation if system is NOT already bootstrapped
-  if (!alreadyBootstrapped) {
-    const standardAccounts = [
-      {
-        id: '20000000-0000-0000-0000-000000000001',
-        email: 'admin@labguard.edu',
-        password: 'Admin@123456',
-        fullName: 'Institutional System Administrator',
-        role: 'ADMIN' as UserRole,
-        phone: '+1 800-LABGUARD',
-        identifier: 'admin@labguard.edu',
-        department: 'General',
-        assignedLabs: []
-      },
-      {
-        id: '00000000-0000-0000-0000-000000000002',
-        email: 'faculty@labguard.edu',
-        password: 'Faculty@123456',
-        fullName: 'Faculty Member',
-        role: 'FACULTY' as UserRole,
-        phone: '+1 800-LABGUARD-F',
-        identifier: 'faculty@labguard.edu',
-        department: 'General',
-        assignedLabs: [],
-        assignedClasses: []
-      },
-      {
-        id: '00000000-0000-0000-0000-000000000003',
-        email: 'assistant@labguard.edu',
-        password: 'Assistant@123456',
-        fullName: 'Lab Operations Assistant',
-        role: 'LAB_ASSISTANT' as UserRole,
-        phone: '+1 800-LABGUARD-A',
-        identifier: 'assistant@labguard.edu',
-        department: 'General',
-        assignedLabs: []
-      },
-      {
-        id: '00000000-0000-0000-0000-000000000004',
-        email: 'student@labguard.edu',
-        password: 'Student@123456',
-        fullName: 'Enrolled Student',
-        role: 'STUDENT' as UserRole,
-        phone: '+1 800-LABGUARD-S',
-        identifier: 'STU-2026-001',
-        department: 'General',
-        course: 'B.Tech',
-        yearOfStudy: 3,
-        semester: 5,
-        section: 'A',
-        academicYear: '2026-2027',
-        assignedLabs: []
-      }
-    ];
-
-    // Insert standard accounts into in-memory store if not present
-    for (const acc of standardAccounts) {
-      const existing = db.findOne<any>('users', (u) => u.email.toLowerCase() === acc.email.toLowerCase());
-      if (!existing) {
-        const passwordHash = bcrypt.hashSync(acc.password, salt);
-        const userObj = {
-          id: acc.id,
-          email: acc.email,
-          passwordHash,
-          fullName: acc.fullName,
-          role: acc.role,
-          phone: acc.phone,
-          identifier: acc.identifier,
-          department: acc.department || 'General',
-          isActive: true,
-          assignedLabs: (acc as any).assignedLabs || [],
-          assignedClasses: (acc as any).assignedClasses || [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        db.insert('users', userObj);
-
-        if (acc.role === 'STUDENT') {
-          const existingStudent = db.findOne<any>('students', (s) => s.userId === acc.id);
-          if (!existingStudent) {
-            db.insert('students', {
-              id: uuidv4(),
-              userId: acc.id,
-              studentId: acc.identifier,
-              department: acc.department || 'General',
-              course: (acc as any).course || 'B.Tech',
-              yearOfStudy: (acc as any).yearOfStudy || 3,
-              semester: (acc as any).semester || 5,
-              section: (acc as any).section || 'A',
-              academicYear: (acc as any).academicYear || '2026-2027',
-              createdAt: new Date().toISOString()
-            });
-          }
-        }
-      }
-    }
-  } else {
-    // If already bootstrapped, ensure at least one admin exists so system is never locked out
-    const adminUser = db.findOne<any>('users', (u) => u.role === 'ADMIN');
-    if (!adminUser) {
-      const passwordHash = bcrypt.hashSync('Admin@123456', salt);
-      db.insert('users', {
-        id: '20000000-0000-0000-0000-000000000001',
-        email: 'admin@labguard.edu',
-        passwordHash,
-        fullName: 'Institutional System Administrator',
-        role: 'ADMIN' as UserRole,
-        phone: '+1 800-LABGUARD',
-        identifier: 'admin@labguard.edu',
-        department: 'General',
-        isActive: true,
-        assignedLabs: [],
-        assignedClasses: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-    }
+  // Zero Demo Accounts Policy: Strictly ensure only the primary Institutional Administrator exists as the anchor
+  const adminUser = db.findOne<any>('users', (u) => u.role === 'ADMIN');
+  if (!adminUser) {
+    const passwordHash = bcrypt.hashSync('Admin@123456', salt);
+    db.insert('users', {
+      id: '20000000-0000-0000-0000-000000000001',
+      email: 'admin@labguard.edu',
+      passwordHash,
+      fullName: 'Institutional System Administrator',
+      role: 'ADMIN' as UserRole,
+      phone: '+1 800-LABGUARD',
+      identifier: 'admin@labguard.edu',
+      department: 'Administration',
+      isActive: true,
+      assignedLabs: [],
+      assignedClasses: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
   }
 
-  // Hydrate from Supabase Cloud
+  // Hydrate from Supabase Cloud (Strictly skip any permanently deleted users)
   if (sb) {
     try {
       // 1. Hydrate extended cache if available
@@ -214,6 +117,7 @@ const ensureBootstrapInstitutionalUsers = async () => {
           if (parsed && Array.isArray(parsed.users)) {
             const userStore = db.getStore('users');
             for (const u of parsed.users) {
+              if (db.isDeleted(u.id)) continue; // Never resurrect permanently deleted users
               const existing = userStore.find(eu => eu.id === u.id || eu.email.toLowerCase() === u.email.toLowerCase());
               if (!existing) {
                 userStore.push({
@@ -1008,6 +912,9 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
   db.delete('students', (s: any) => s.userId === userId);
   // Delete user account
   db.delete('users', (u: any) => u.id === userId);
+  // Record permanent tombstone so user cannot be resurrected by background sync
+  db.recordDeletion(userId, 'USER', { email: user.email, identifier: user.identifier });
+  db.flush();
 
   const sb = getSupabase();
   if (sb) {
@@ -1023,6 +930,10 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
 
   // Update cloud cache so user is permanently removed and not resurrected
   await syncExtendedUserCacheToSupabase();
+
+  try {
+    RealtimeService.broadcast('USER_DELETED', { userId, email: user.email });
+  } catch {}
 
   // Audit record
   db.insert('audit_logs', {

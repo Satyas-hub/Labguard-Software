@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ApiClient } from '../services/api';
 import { NativeService } from '../services/native';
+import { LocalDbService } from '../db/localDb';
 import {
   LayoutDashboard, Users, Monitor, Building2, BookOpen,
   ClipboardList, Settings, Plus, RefreshCw, AlertTriangle, CheckCircle2,
@@ -316,6 +317,7 @@ export const AdminView: React.FC = () => {
 
     const res = await ApiClient.request(`/labs/${lab.id}`, { method: 'DELETE' });
     if (res.success) {
+      await LocalDbService.deleteLab(lab.id, lab.code);
       await fetchLabsData();
     } else {
       if (res.error === 'CANNOT_DELETE_HAS_DEPENDENCIES') {
@@ -498,6 +500,7 @@ export const AdminView: React.FC = () => {
     }
     const res: any = await ApiClient.request(`/computers/${pc.id}`, { method: 'DELETE' });
     if (res.success) {
+      await LocalDbService.deleteComputer(pc.id, pc.pcCode, pc.labCode);
       await fetchLabsData();
     } else {
       alert(res.message || res.error || 'Failed to delete workstation');
@@ -708,6 +711,7 @@ export const AdminView: React.FC = () => {
     }
     const res: any = await ApiClient.request(`/equipment/${item.id}`, { method: 'DELETE' });
     if (res.success) {
+      await LocalDbService.deleteEquipment(item.id);
       await fetchLabsData();
     } else {
       alert(res.message || res.error || 'Failed to delete equipment');
@@ -1072,6 +1076,7 @@ export const AdminView: React.FC = () => {
     });
     setFormSubmitting(false);
     if (res.success) {
+      await LocalDbService.deleteUser(deletingUser.id, deletingUser.email);
       setDeletingUser(null);
       fetchUsers(userPagination.page);
       loadData();

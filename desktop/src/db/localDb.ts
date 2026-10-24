@@ -198,6 +198,7 @@ class MemorySqliteStore {
   public auditLogs: Map<string, LocalAuditLog> = new Map();
   public syncQueue: Map<string, LocalSyncQueueItem> = new Map();
   public syncConflicts: Map<string, any> = new Map();
+  public deletedEntityIds: Set<string> = new Set();
 
   private saveTimer: any = null;
 
@@ -231,7 +232,8 @@ class MemorySqliteStore {
         notifications: Array.from(this.notifications.entries()),
         auditLogs: Array.from(this.auditLogs.entries()),
         syncQueue: Array.from(this.syncQueue.entries()),
-        syncConflicts: Array.from(this.syncConflicts.entries())
+        syncConflicts: Array.from(this.syncConflicts.entries()),
+        deletedEntityIds: Array.from(this.deletedEntityIds)
       };
       localStorage.setItem('LABGUARD_LOCAL_VAULT_STORE_V3', JSON.stringify(data));
     } catch (e) {
@@ -259,6 +261,25 @@ class MemorySqliteStore {
         if (data.auditLogs) this.auditLogs = new Map(data.auditLogs);
         if (data.syncQueue) this.syncQueue = new Map(data.syncQueue);
         if (data.syncConflicts) this.syncConflicts = new Map(data.syncConflicts);
+        if (data.deletedEntityIds && Array.isArray(data.deletedEntityIds)) {
+          this.deletedEntityIds = new Set(data.deletedEntityIds);
+        }
+      }
+
+      // Purge any resurrected deleted entities
+      if (this.deletedEntityIds.size > 0) {
+        for (const [id] of this.users.entries()) {
+          if (this.deletedEntityIds.has(id)) this.users.delete(id);
+        }
+        for (const [id] of this.labs.entries()) {
+          if (this.deletedEntityIds.has(id)) this.labs.delete(id);
+        }
+        for (const [id] of this.computers.entries()) {
+          if (this.deletedEntityIds.has(id)) this.computers.delete(id);
+        }
+        for (const [id] of this.equipment.entries()) {
+          if (this.deletedEntityIds.has(id)) this.equipment.delete(id);
+        }
       }
     } catch (e) {
       console.warn('[LocalDb] Failed to hydrate local vault from localStorage:', e);
@@ -266,7 +287,7 @@ class MemorySqliteStore {
   }
 
   public ensureDefaultSeeds() {
-    // Zero demo data policy. Only records synchronized from Supabase / native database are maintained.
+    // Zero demo data policy. Only genuine root admin and synchronized records are retained.
     this.schedulePersist();
   }
 
@@ -405,28 +426,222 @@ export const LocalDbService = {
     try {
       const invokeFn = await getInvoke();
       if (invokeFn) {
-        return await invokeFn('execute_local_db', { sql });
+        await invokeFn('execute_local_db', { sql });
       }
     } catch (e: any) {
       isTauriAvailable = false;
     }
 
     const s = sql.trim();
-    if (s.includes('UPDATE local_users SET is_active = 0')) {
+    const upper = s.toUpperCase();
+
+    if (upper.includes('UPDATE LOCAL_USERS SET IS_ACTIVE = 0')) {
       for (const u of memoryStore.users.values()) {
         if (s.includes(u.email) || (u.identifier && s.includes(u.identifier)) || s.includes(u.id)) {
           u.is_active = 0;
         }
       }
-    } else if (s.includes('UPDATE local_users SET is_active = 1')) {
+    } else if (upper.includes('UPDATE LOCAL_USERS SET IS_ACTIVE = 1')) {
       for (const u of memoryStore.users.values()) {
         if (s.includes(u.email) || (u.identifier && s.includes(u.identifier)) || s.includes(u.id)) {
           u.is_active = 1;
         }
       }
+    } else if (upper.includes('DELETE FROM LOCAL_USERS')) {
+      if (!upper.includes('WHERE')) {
+        memoryStore.users.clear();
+      } else {
+        for (const [key, u] of Array.from(memoryStore.users.entries())) {
+          if (s.includes(u.id) || (u.email && s.toLowerCase().includes(u.email.toLowerCase()))) {
+            memoryStore.users.delete(key);
+            memoryStore.deletedEntityIds.add(u.id);
+          }
+        }
+      }
+    } else if (upper.includes('DELETE FROM LOCAL_LABS')) {
+      if (!upper.includes('WHERE')) {
+        memoryStore.labs.clear();
+      } else {
+        for (const [key, lab] of Array.from(memoryStore.labs.entries())) {
+          if (s.includes(lab.id) || (lab.code && upper.includes(lab.code.toUpperCase()))) {
+            memoryStore.labs.delete(key);
+            memoryStore.deletedEntityIds.add(lab.id);
+          }
+        }
+      }
+    } else if (upper.includes('DELETE FROM LOCAL_COMPUTERS')) {
+      if (!upper.includes('WHERE')) {
+        memoryStore.computers.clear();
+      } else {
+        for (const [key, comp] of Array.from(memoryStore.computers.entries())) {
+          if (s.includes(comp.id) || (comp.pc_code && upper.includes(comp.pc_code.toUpperCase()))) {
+            memoryStore.computers.delete(key);
+            memoryStore.deletedEntityIds.add(comp.id);
+          }
+        }
+      }
+    } else if (upper.includes('DELETE FROM LOCAL_EQUIPMENT')) {
+      if (!upper.includes('WHERE')) {
+        memoryStore.equipment.clear();
+      } else {
+        for (const [key, eq] of Array.from(memoryStore.equipment.entries())) {
+          if (s.includes(eq.id) || (eq.asset_tag && upper.includes(eq.asset_tag.toUpperCase()))) {
+            memoryStore.equipment.delete(key);
+            memoryStore.deletedEntityIds.add(eq.id);
+          }
+        }
+      }
+    } else if (upper.includes('DELETE FROM LOCAL_SESSIONS')) {
+      if (!upper.includes('WHERE')) {
+        memoryStore.sessions.clear();
+      } else {
+        for (const [key, sess] of Array.from(memoryStore.sessions.entries())) {
+          if (s.includes(sess.id)) memoryStore.sessions.delete(key);
+        }
+      }
+    } else if (upper.includes('DELETE FROM LOCAL_ISSUES')) {
+      if (!upper.includes('WHERE')) {
+        memoryStore.issues.clear();
+      } else {
+        for (const [key, iss] of Array.from(memoryStore.issues.entries())) {
+          if (s.includes(iss.id)) memoryStore.issues.delete(key);
+        }
+      }
+    } else if (upper.includes('DELETE FROM LOCAL_AUTHORIZATIONS')) {
+      if (!upper.includes('WHERE')) {
+        memoryStore.authorizations.clear();
+      } else {
+        for (const [key, auth] of Array.from(memoryStore.authorizations.entries())) {
+          if (s.includes(auth.user_id) || s.includes(auth.id)) memoryStore.authorizations.delete(key);
+        }
+      }
     }
 
+    memoryStore.schedulePersist();
     return 1;
+  },
+
+  /**
+   * Permanently delete a user from local SQLite and in-memory vault
+   */
+  async deleteUser(id: string, email?: string): Promise<void> {
+    memoryStore.users.delete(id);
+    for (const [key, u] of Array.from(memoryStore.users.entries())) {
+      if (u.id === id || (email && u.email.toLowerCase() === email.toLowerCase())) {
+        memoryStore.users.delete(key);
+      }
+    }
+    for (const [key, auth] of Array.from(memoryStore.authorizations.entries())) {
+      if (auth.user_id === id) {
+        memoryStore.authorizations.delete(key);
+      }
+    }
+    memoryStore.deletedEntityIds.add(id);
+    memoryStore.schedulePersist();
+
+    const cleanId = id.replace(/'/g, "''");
+    const cleanEmail = (email || '').replace(/'/g, "''");
+    let sql = `DELETE FROM local_users WHERE id = '${cleanId}'`;
+    if (cleanEmail) {
+      sql += ` OR LOWER(email) = '${cleanEmail.toLowerCase()}'`;
+    }
+    sql += ';';
+    await this.execute(sql);
+    await this.execute(`DELETE FROM local_authorizations WHERE user_id = '${cleanId}';`);
+  },
+
+  /**
+   * Permanently delete a laboratory from local SQLite and in-memory vault
+   */
+  async deleteLab(id: string, code?: string): Promise<void> {
+    memoryStore.labs.delete(id);
+    const labUpper = (code || '').toUpperCase();
+    for (const [key, l] of Array.from(memoryStore.labs.entries())) {
+      if (l.id === id || (labUpper && l.code.toUpperCase() === labUpper)) {
+        memoryStore.labs.delete(key);
+      }
+    }
+    // Cascade remove computers and equipment
+    if (labUpper) {
+      for (const [key, c] of Array.from(memoryStore.computers.entries())) {
+        if ((c.lab_code || '').toUpperCase() === labUpper) {
+          memoryStore.computers.delete(key);
+        }
+      }
+      for (const [key, eq] of Array.from(memoryStore.equipment.entries())) {
+        if ((eq.lab_code || '').toUpperCase() === labUpper) {
+          memoryStore.equipment.delete(key);
+        }
+      }
+    }
+    memoryStore.deletedEntityIds.add(id);
+    memoryStore.schedulePersist();
+
+    const cleanId = id.replace(/'/g, "''");
+    const cleanCode = (code || '').replace(/'/g, "''");
+    await this.execute(`DELETE FROM local_labs WHERE id = '${cleanId}' OR UPPER(code) = '${cleanCode.toUpperCase()}';`);
+    if (cleanCode) {
+      await this.execute(`DELETE FROM local_computers WHERE UPPER(lab_code) = '${cleanCode.toUpperCase()}';`);
+      await this.execute(`DELETE FROM local_equipment WHERE UPPER(lab_code) = '${cleanCode.toUpperCase()}';`);
+    }
+  },
+
+  /**
+   * Permanently delete a workstation from local SQLite and in-memory vault
+   */
+  async deleteComputer(id: string, pcCode?: string, labCode?: string): Promise<void> {
+    memoryStore.computers.delete(id);
+    const pcUpper = (pcCode || '').toUpperCase();
+    const labUpper = (labCode || '').toUpperCase();
+    for (const [key, c] of Array.from(memoryStore.computers.entries())) {
+      if (c.id === id || (pcUpper && (c.pc_code || '').toUpperCase() === pcUpper && (!labUpper || (c.lab_code || '').toUpperCase() === labUpper))) {
+        memoryStore.computers.delete(key);
+      }
+    }
+    memoryStore.deletedEntityIds.add(id);
+    memoryStore.schedulePersist();
+
+    const cleanId = id.replace(/'/g, "''");
+    let sql = `DELETE FROM local_computers WHERE id = '${cleanId}'`;
+    if (pcCode) {
+      sql += ` OR (UPPER(pc_code) = '${pcUpper}'`;
+      if (labCode) sql += ` AND UPPER(lab_code) = '${labUpper}'`;
+      sql += ')';
+    }
+    sql += ';';
+    await this.execute(sql);
+  },
+
+  /**
+   * Permanently delete equipment from local SQLite and in-memory vault
+   */
+  async deleteEquipment(id: string): Promise<void> {
+    memoryStore.equipment.delete(id);
+    memoryStore.deletedEntityIds.add(id);
+    memoryStore.schedulePersist();
+
+    const cleanId = id.replace(/'/g, "''");
+    await this.execute(`DELETE FROM local_equipment WHERE id = '${cleanId}';`);
+  },
+
+  /**
+   * Purges all mock / demo data while preserving authentic administrator anchor
+   */
+  async purgeLocalDemoData(): Promise<void> {
+    for (const [key, u] of Array.from(memoryStore.users.entries())) {
+      if (u.role !== 'ADMIN' && u.email !== 'admin@labguard.edu') {
+        memoryStore.users.delete(key);
+      }
+    }
+    memoryStore.labs.clear();
+    memoryStore.computers.clear();
+    memoryStore.equipment.clear();
+    memoryStore.schedulePersist();
+
+    await this.execute("DELETE FROM local_users WHERE email != 'admin@labguard.edu' AND role != 'ADMIN';");
+    await this.execute("DELETE FROM local_labs;");
+    await this.execute("DELETE FROM local_computers;");
+    await this.execute("DELETE FROM local_equipment;");
   },
 
   // ==========================================================================

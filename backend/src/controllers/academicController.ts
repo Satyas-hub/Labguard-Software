@@ -75,6 +75,7 @@ export const bootstrapAcademicData = async () => {
         const deptsStore = db.getStore('departments');
         deptsStore.length = 0;
         for (const d of supaDepts) {
+          if (db.isDeleted(d.id)) continue;
           deptsStore.push({
             id: d.id,
             code: d.code,
@@ -89,6 +90,7 @@ export const bootstrapAcademicData = async () => {
           const coursesStore = db.getStore('courses');
           coursesStore.length = 0;
           for (const c of supaCourses) {
+            if (db.isDeleted(c.id)) continue;
             const deptObj = deptsStore.find(x => x.id === c.department_id);
             coursesStore.push({
               id: c.id,
@@ -107,6 +109,7 @@ export const bootstrapAcademicData = async () => {
           const subsStore = db.getStore('subjects');
           subsStore.length = 0;
           for (const s of supaSubs) {
+            if (db.isDeleted(s.id)) continue;
             const deptObj = deptsStore.find(x => x.code === s.department);
             subsStore.push({
               id: s.id,
@@ -127,6 +130,7 @@ export const bootstrapAcademicData = async () => {
           const yearsStore = db.getStore('academic_years');
           yearsStore.length = 0;
           for (const y of supaYears) {
+            if (db.isDeleted(y.id)) continue;
             yearsStore.push({
               id: y.id,
               year: y.year_code,
@@ -430,6 +434,8 @@ export const deleteDepartment = async (req: AuthenticatedRequest, res: Response)
   if (index !== -1) {
     depts.splice(index, 1);
   }
+  db.recordDeletion(id, 'DEPARTMENT', { code: dept.code });
+  db.flush();
 
   // Remove from Supabase Cloud
   const sb = getSupabase();
@@ -645,6 +651,8 @@ export const deleteCourse = async (req: AuthenticatedRequest, res: Response) => 
   const courses = db.getStore('courses');
   const index = courses.findIndex((c) => c.id === id);
   if (index !== -1) courses.splice(index, 1);
+  db.recordDeletion(id, 'COURSE', { code: course.code });
+  db.flush();
 
   const sb = getSupabase();
   if (sb) {
@@ -850,6 +858,8 @@ export const deleteSubject = async (req: AuthenticatedRequest, res: Response) =>
   const subjects = db.getStore('subjects');
   const index = subjects.findIndex((s) => s.id === id);
   if (index !== -1) subjects.splice(index, 1);
+  db.recordDeletion(id, 'SUBJECT', { code: subject.code });
+  db.flush();
 
   const sb = getSupabase();
   if (sb) {
@@ -1002,6 +1012,8 @@ export const deleteAcademicYear = async (req: AuthenticatedRequest, res: Respons
   const years = db.getStore('academic_years');
   const index = years.findIndex((item) => item.id === id);
   if (index !== -1) years.splice(index, 1);
+  db.recordDeletion(id, 'ACADEMIC_YEAR', { year: y.year });
+  db.flush();
 
   const sb = getSupabase();
   if (sb) {
@@ -1097,6 +1109,8 @@ export const deleteSection = async (req: AuthenticatedRequest, res: Response) =>
   const sections = db.getStore('sections');
   const index = sections.findIndex((s) => s.id === id);
   if (index !== -1) sections.splice(index, 1);
+  db.recordDeletion(id, 'SECTION', { name: section.name });
+  db.flush();
 
   const sb = getSupabase();
   if (sb) {
@@ -1408,14 +1422,15 @@ export const updateClass = async (req: AuthenticatedRequest, res: Response) => {
 
 export const deleteClass = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
+  hasBootstrappedAcademic = true;
   const cl = db.findOne<ClassEntity>('classes', (item) => item.id === id);
   if (!cl) {
     return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Class offering not found' });
   }
 
-  const classes = db.getStore('classes');
-  const index = classes.findIndex((item) => item.id === id);
-  if (index !== -1) classes.splice(index, 1);
+  db.delete('classes', (item: any) => item.id === id);
+  db.recordDeletion(id, 'CLASS', { name: cl.name });
+  db.flush();
 
   // Cascade delete in-memory class student assignments
   db.delete('class_students', (cs: any) => cs.classId === id);

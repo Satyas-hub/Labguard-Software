@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { UserRole } from '../../../shared/types';
 import { Shield, Keyboard, Mouse, Monitor, AlertCircle, ArrowRight, Settings, Server, CheckCircle2, X, RefreshCw, Building2, CheckCircle, XCircle, Wrench } from 'lucide-react';
 import { NativeService, NativeHardwareStatus } from '../services/native';
+import { PeripheralScanner } from '../services/peripheralScanner';
 import { getServerUrl, setServerUrl, ApiClient } from '../services/api';
 import { APP_VERSION } from '../config/version';
 
@@ -135,7 +136,15 @@ export const LoginView: React.FC<LoginViewProps> = ({ initialRole, onBackToLockS
   };
 
   useEffect(() => {
-    NativeService.getHardwareStatus().then(setHwStatus);
+    const unsub = PeripheralScanner.subscribe((status) => {
+      setHwStatus(status);
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  useEffect(() => {
     setIdentifier('');
     setPassword('');
     setError(null);

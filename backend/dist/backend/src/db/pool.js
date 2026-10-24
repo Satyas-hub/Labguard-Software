@@ -62,6 +62,7 @@ const memoryStore = {
     notification_preferences: [],
     audit_logs: [],
     sync_events: [],
+    deleted_entities: [],
     system_settings: []
 };
 // ----------------------------------------------------------------------------
@@ -71,12 +72,26 @@ const memoryStore = {
 // ----------------------------------------------------------------------------
 function getStorageFilePaths() {
     const paths = [];
-    // 1. Workspace Data Directory (Local dev / standalone server)
+    // 1. Workspace Data Directory (process.cwd() and relative to __dirname)
     try {
         const wsData = path_1.default.resolve(process.cwd(), 'data');
         if (!fs_1.default.existsSync(wsData))
             fs_1.default.mkdirSync(wsData, { recursive: true });
         paths.push(path_1.default.join(wsData, 'backend_store.json'));
+    }
+    catch { }
+    try {
+        const relData = path_1.default.resolve(__dirname, '../../../data');
+        if (!fs_1.default.existsSync(relData))
+            fs_1.default.mkdirSync(relData, { recursive: true });
+        paths.push(path_1.default.join(relData, 'backend_store.json'));
+    }
+    catch { }
+    try {
+        const relBackendData = path_1.default.resolve(__dirname, '../../data');
+        if (!fs_1.default.existsSync(relBackendData))
+            fs_1.default.mkdirSync(relBackendData, { recursive: true });
+        paths.push(path_1.default.join(relBackendData, 'backend_store.json'));
     }
     catch { }
     // 2. LocalAppData Directory (Current User)
@@ -99,7 +114,7 @@ function getStorageFilePaths() {
         paths.push(path_1.default.join(enterpriseDir, 'backend_store.json'));
     }
     catch { }
-    return paths;
+    return Array.from(new Set(paths));
 }
 const STORAGE_PATHS = getStorageFilePaths();
 let saveTimeout = null;
@@ -112,7 +127,7 @@ function loadPersistentStore() {
                 if (content && content.trim()) {
                     const parsed = JSON.parse(content);
                     for (const key of Object.keys(parsed)) {
-                        if (Array.isArray(parsed[key]) && parsed[key].length > 0) {
+                        if (Array.isArray(parsed[key])) {
                             memoryStore[key] = parsed[key];
                         }
                     }
@@ -126,6 +141,15 @@ function loadPersistentStore() {
             console.warn(`[DB Persistence] Failed loading from ${filePath}:`, err.message);
         }
     }
+    // Purge any deleted entities from memory if resurrected
+    if (Array.isArray(memoryStore.deleted_entities) && memoryStore.deleted_entities.length > 0) {
+        const deletedIds = new Set(memoryStore.deleted_entities.map((d) => d.id));
+        for (const key of ['users', 'students', 'faculty', 'lab_assistants', 'labs', 'computers', 'equipment', 'departments', 'courses', 'subjects', 'classes']) {
+            if (Array.isArray(memoryStore[key])) {
+                memoryStore[key] = memoryStore[key].filter((item) => !deletedIds.has(item.id));
+            }
+        }
+    }
     scheduleSave();
 }
 function scheduleSave() {
@@ -133,9 +157,13 @@ function scheduleSave() {
         clearTimeout(saveTimeout);
     saveTimeout = setTimeout(() => {
         saveToDisk();
-    }, 100);
+    }, 50);
 }
 function saveToDisk() {
+    if (saveTimeout) {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+    }
     const dataToSave = {};
     for (const key of Object.keys(memoryStore)) {
         dataToSave[key] = memoryStore[key];
@@ -207,9 +235,29 @@ exports.db = {
         memoryStore[table] = list.filter((item) => !predicate(item));
         const changed = memoryStore[table].length !== initialLen;
         if (changed) {
-            scheduleSave();
+            saveToDisk(); // Save to disk immediately upon deletion
         }
         return changed;
+    },
+    recordDeletion(id, entityType, extra) {
+        if (!Array.isArray(memoryStore.deleted_entities)) {
+            memoryStore.deleted_entities = [];
+        }
+        const existing = memoryStore.deleted_entities.find((d) => d.id === id);
+        if (!existing) {
+            memoryStore.deleted_entities.push({
+                id,
+                entityType,
+                deletedAt: new Date().toISOString(),
+                ...(extra || {})
+            });
+        }
+        saveToDisk();
+    },
+    isDeleted(id) {
+        if (!Array.isArray(memoryStore.deleted_entities))
+            return false;
+        return memoryStore.deleted_entities.some((d) => d.id === id);
     },
     flush() {
         try {
