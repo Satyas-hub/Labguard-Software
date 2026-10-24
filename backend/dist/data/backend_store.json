@@ -64,13 +64,6 @@
   "notification_preferences": [],
   "audit_logs": [],
   "sync_events": [],
-  "deleted_entities": [
-    {
-      "id": "test-user-123",
-      "entityType": "USER",
-      "deletedAt": "2026-10-24T07:51:26.272Z",
-      "email": "test@example.edu"
-    }
-  ],
+  "deleted_entities": [],
   "system_settings": []
 }

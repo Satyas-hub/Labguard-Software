@@ -240,6 +240,8 @@ exports.db = {
         return changed;
     },
     recordDeletion(id, entityType, extra) {
+        if (!id)
+            return;
         if (!Array.isArray(memoryStore.deleted_entities)) {
             memoryStore.deleted_entities = [];
         }
@@ -252,12 +254,52 @@ exports.db = {
                 ...(extra || {})
             });
         }
+        // Instantly purge entity from all active memory tables so it cannot linger
+        const targetTables = ['users', 'students', 'faculty', 'lab_assistants', 'labs', 'computers', 'equipment', 'departments', 'courses', 'subjects', 'classes', 'academic_years', 'sections'];
+        for (const table of targetTables) {
+            if (Array.isArray(memoryStore[table])) {
+                memoryStore[table] = memoryStore[table].filter((item) => {
+                    if (item.id === id)
+                        return false;
+                    if (extra?.code && item.code && String(item.code).toLowerCase() === String(extra.code).toLowerCase())
+                        return false;
+                    if (extra?.email && item.email && String(item.email).toLowerCase() === String(extra.email).toLowerCase())
+                        return false;
+                    if (extra?.pcCode && item.pcCode && String(item.pcCode).toLowerCase() === String(extra.pcCode).toLowerCase())
+                        return false;
+                    if (extra?.assetId && item.assetId && String(item.assetId).toLowerCase() === String(extra.assetId).toLowerCase())
+                        return false;
+                    if (extra?.studentId && (item.studentId || item.rollNumber) && (String(item.studentId || item.rollNumber).toLowerCase() === String(extra.studentId).toLowerCase()))
+                        return false;
+                    if (extra?.year && item.year && String(item.year).toLowerCase() === String(extra.year).toLowerCase())
+                        return false;
+                    return true;
+                });
+            }
+        }
         saveToDisk();
     },
-    isDeleted(id) {
-        if (!Array.isArray(memoryStore.deleted_entities))
+    isDeleted(identifier) {
+        if (!identifier || !Array.isArray(memoryStore.deleted_entities))
             return false;
-        return memoryStore.deleted_entities.some((d) => d.id === id);
+        const lower = String(identifier).trim().toLowerCase();
+        return memoryStore.deleted_entities.some((d) => {
+            if (d.id === identifier)
+                return true;
+            if (d.code && String(d.code).trim().toLowerCase() === lower)
+                return true;
+            if (d.email && String(d.email).trim().toLowerCase() === lower)
+                return true;
+            if (d.pcCode && String(d.pcCode).trim().toLowerCase() === lower)
+                return true;
+            if (d.assetId && String(d.assetId).trim().toLowerCase() === lower)
+                return true;
+            if (d.studentId && String(d.studentId).trim().toLowerCase() === lower)
+                return true;
+            if (d.year && String(d.year).trim().toLowerCase() === lower)
+                return true;
+            return false;
+        });
     },
     flush() {
         try {

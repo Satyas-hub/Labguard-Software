@@ -19,7 +19,7 @@ import {
   Session
 } from '../../../shared/types';
 import bcrypt from 'bcryptjs';
-import { getSupabase, isInstitutionBootstrapped, markInstitutionBootstrapped } from '../db/supabaseSyncHelper';
+import { getSupabase, isInstitutionBootstrapped, markInstitutionBootstrapped, syncCloudTombstones, recordCloudDeletion } from '../db/supabaseSyncHelper';
 
 let hasBootstrappedAcademic = false;
 
@@ -66,32 +66,59 @@ export const bootstrapAcademicData = async () => {
   hasBootstrappedAcademic = true;
 
   const sb = getSupabase();
-  const alreadyBootstrapped = await isInstitutionBootstrapped();
+  await syncCloudTombstones();
 
   if (sb) {
     try {
       const { data: supaDepts } = await sb.from('academic_departments').select('*').order('code');
-      if (supaDepts && supaDepts.length > 0) {
+      if (Array.isArray(supaDepts)) {
         const deptsStore = db.getStore('departments');
-        deptsStore.length = 0;
-        for (const d of supaDepts) {
-          if (db.isDeleted(d.id)) continue;
-          deptsStore.push({
-            id: d.id,
-            code: d.code,
-            name: d.name,
-            description: d.description || '',
-            createdAt: d.created_at || new Date().toISOString()
-          });
-        }
+        const supaDeptIds = new Set(supaDepts.map(d => d.id));
+        const supaDeptCodes = new Set(supaDepts.map(d => (d.code || '').toUpperCase()));
 
-        const { data: supaCourses } = await sb.from('academic_courses').select('*').order('code');
-        if (supaCourses && supaCourses.length > 0) {
-          const coursesStore = db.getStore('courses');
-          coursesStore.length = 0;
-          for (const c of supaCourses) {
-            if (db.isDeleted(c.id)) continue;
-            const deptObj = deptsStore.find(x => x.id === c.department_id);
+        // Bidirectional purge: if deleted from Supabase, remove locally
+        for (let i = deptsStore.length - 1; i >= 0; i--) {
+          const item = deptsStore[i];
+          if (db.isDeleted(item.id) || db.isDeleted(item.code) || (!supaDeptIds.has(item.id) && !supaDeptCodes.has((item.code || '').toUpperCase()))) {
+            db.recordDeletion(item.id, 'DEPARTMENT', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+            deptsStore.splice(i, 1);
+          }
+        }
+        for (const d of supaDepts) {
+          if (db.isDeleted(d.id) || db.isDeleted(d.code)) continue;
+          const existing = deptsStore.find(x => x.id === d.id || x.code.toUpperCase() === d.code.toUpperCase());
+          if (!existing) {
+            deptsStore.push({
+              id: d.id,
+              code: d.code,
+              name: d.name,
+              description: d.description || '',
+              createdAt: d.created_at || new Date().toISOString()
+            });
+          }
+        }
+      }
+
+      const { data: supaCourses } = await sb.from('academic_courses').select('*').order('code');
+      if (Array.isArray(supaCourses)) {
+        const coursesStore = db.getStore('courses');
+        const deptsStore = db.getStore('departments');
+        const supaCourseIds = new Set(supaCourses.map(c => c.id));
+        const supaCourseCodes = new Set(supaCourses.map(c => (c.code || '').toUpperCase()));
+
+        // Bidirectional purge: if deleted from Supabase, remove locally
+        for (let i = coursesStore.length - 1; i >= 0; i--) {
+          const item = coursesStore[i];
+          if (db.isDeleted(item.id) || db.isDeleted(item.code) || (!supaCourseIds.has(item.id) && !supaCourseCodes.has((item.code || '').toUpperCase()))) {
+            db.recordDeletion(item.id, 'COURSE', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+            coursesStore.splice(i, 1);
+          }
+        }
+        for (const c of supaCourses) {
+          if (db.isDeleted(c.id) || db.isDeleted(c.code)) continue;
+          const deptObj = deptsStore.find(x => x.id === c.department_id);
+          const existing = coursesStore.find(x => x.id === c.id || x.code.toUpperCase() === c.code.toUpperCase());
+          if (!existing) {
             coursesStore.push({
               id: c.id,
               code: c.code,
@@ -103,14 +130,27 @@ export const bootstrapAcademicData = async () => {
             });
           }
         }
+      }
 
-        const { data: supaSubs } = await sb.from('subjects').select('*').order('code');
-        if (supaSubs && supaSubs.length > 0) {
-          const subsStore = db.getStore('subjects');
-          subsStore.length = 0;
-          for (const s of supaSubs) {
-            if (db.isDeleted(s.id)) continue;
-            const deptObj = deptsStore.find(x => x.code === s.department);
+      const { data: supaSubs } = await sb.from('subjects').select('*').order('code');
+      if (Array.isArray(supaSubs)) {
+        const subsStore = db.getStore('subjects');
+        const deptsStore = db.getStore('departments');
+        const supaSubIds = new Set(supaSubs.map(s => s.id));
+        const supaSubCodes = new Set(supaSubs.map(s => (s.code || '').toUpperCase()));
+
+        for (let i = subsStore.length - 1; i >= 0; i--) {
+          const item = subsStore[i];
+          if (db.isDeleted(item.id) || db.isDeleted(item.code) || (!supaSubIds.has(item.id) && !supaSubCodes.has((item.code || '').toUpperCase()))) {
+            db.recordDeletion(item.id, 'SUBJECT', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+            subsStore.splice(i, 1);
+          }
+        }
+        for (const s of supaSubs) {
+          if (db.isDeleted(s.id) || db.isDeleted(s.code)) continue;
+          const deptObj = deptsStore.find(x => x.code === s.department);
+          const existing = subsStore.find(x => x.id === s.id || x.code.toUpperCase() === s.code.toUpperCase());
+          if (!existing) {
             subsStore.push({
               id: s.id,
               code: s.code,
@@ -123,14 +163,26 @@ export const bootstrapAcademicData = async () => {
             });
           }
         }
+      }
 
-        // Hydrate Academic Years from Supabase
-        const { data: supaYears } = await sb.from('academic_years').select('*').order('year_code');
-        if (supaYears && supaYears.length > 0) {
-          const yearsStore = db.getStore('academic_years');
-          yearsStore.length = 0;
-          for (const y of supaYears) {
-            if (db.isDeleted(y.id)) continue;
+      // Hydrate Academic Years from Supabase
+      const { data: supaYears } = await sb.from('academic_years').select('*').order('year_code');
+      if (Array.isArray(supaYears)) {
+        const yearsStore = db.getStore('academic_years');
+        const supaYearIds = new Set(supaYears.map(y => y.id));
+        const supaYearCodes = new Set(supaYears.map(y => (y.year_code || '').toUpperCase()));
+
+        for (let i = yearsStore.length - 1; i >= 0; i--) {
+          const item = yearsStore[i];
+          if (db.isDeleted(item.id) || db.isDeleted(item.year) || (!supaYearIds.has(item.id) && !supaYearCodes.has((item.year || '').toUpperCase()))) {
+            db.recordDeletion(item.id, 'ACADEMIC_YEAR', { year: item.year, reason: 'DELETED_FROM_SUPABASE' });
+            yearsStore.splice(i, 1);
+          }
+        }
+        for (const y of supaYears) {
+          if (db.isDeleted(y.id) || db.isDeleted(y.year_code)) continue;
+          const existing = yearsStore.find(x => x.id === y.id || x.year.toUpperCase() === y.year_code.toUpperCase());
+          if (!existing) {
             yearsStore.push({
               id: y.id,
               year: y.year_code,
@@ -141,39 +193,54 @@ export const bootstrapAcademicData = async () => {
             });
           }
         }
+      }
 
-        // Hydrate Sections from Supabase system_settings / sections
-        const { data: secSetting } = await sb.from('system_settings').select('setting_value').eq('setting_key', 'academic_sections').maybeSingle();
-        if (secSetting && secSetting.setting_value) {
-          try {
-            const parsedSecs = JSON.parse(secSetting.setting_value);
-            if (Array.isArray(parsedSecs) && parsedSecs.length > 0) {
-              const secStore = db.getStore('sections');
-              secStore.length = 0;
-              secStore.push(...parsedSecs);
+      // Hydrate Sections from Supabase system_settings / sections
+      const { data: secSetting } = await sb.from('system_settings').select('setting_value').eq('setting_key', 'academic_sections').maybeSingle();
+      if (secSetting && secSetting.setting_value) {
+        try {
+          const parsedSecs = JSON.parse(secSetting.setting_value);
+          if (Array.isArray(parsedSecs)) {
+            const secStore = db.getStore('sections');
+            secStore.length = 0;
+            for (const s of parsedSecs) {
+              if (db.isDeleted(s.id) || db.isDeleted(s.name)) continue;
+              secStore.push(s);
             }
-          } catch {}
+          }
+        } catch {}
+      }
+
+      // Hydrate Faculty Mapping for Foreign Key resolution
+      const { data: supaFacultyList } = await sb.from('faculty').select('id, user_id');
+      const facToUserMap = new Map((supaFacultyList || []).map((f: any) => [f.id, f.user_id]));
+
+      // Hydrate Academic Classes from Supabase
+      const { data: supaClasses } = await sb.from('academic_classes').select('*').order('name');
+      if (Array.isArray(supaClasses)) {
+        const classesStore = db.getStore('classes');
+        const labs = db.getStore('labs');
+        const users = db.getStore('users');
+        const supaClassIds = new Set(supaClasses.map(cl => cl.id));
+
+        for (let i = classesStore.length - 1; i >= 0; i--) {
+          const item = classesStore[i];
+          if (db.isDeleted(item.id) || !supaClassIds.has(item.id)) {
+            db.recordDeletion(item.id, 'CLASS', { name: item.name, reason: 'DELETED_FROM_SUPABASE' });
+            classesStore.splice(i, 1);
+          }
         }
 
-        // Hydrate Faculty Mapping for Foreign Key resolution
-        const { data: supaFacultyList } = await sb.from('faculty').select('id, user_id');
-        const facToUserMap = new Map((supaFacultyList || []).map((f: any) => [f.id, f.user_id]));
+        for (const cl of supaClasses) {
+          if (db.isDeleted(cl.id)) continue;
+          const courseObj = db.findOne<Course>('courses', c => c.id === cl.course_id);
+          const subjectObj = db.findOne<Subject>('subjects', s => s.id === cl.subject_id);
+          const labObj = labs.find((l: any) => l.id === cl.default_lab_id || l.code === cl.default_lab_id);
+          const assignedUserId = facToUserMap.get(cl.faculty_id) || cl.faculty_id;
+          const assignedUser = assignedUserId ? users.find((u: any) => u.id === assignedUserId) : null;
+          const existing = classesStore.find(x => x.id === cl.id);
 
-        // Hydrate Academic Classes from Supabase
-        const { data: supaClasses } = await sb.from('academic_classes').select('*').order('name');
-        if (supaClasses && supaClasses.length > 0) {
-          const classesStore = db.getStore('classes');
-          classesStore.length = 0;
-          const labs = db.getStore('labs');
-          const users = db.getStore('users');
-
-          for (const cl of supaClasses) {
-            const courseObj = db.findOne<Course>('courses', c => c.id === cl.course_id);
-            const subjectObj = db.findOne<Subject>('subjects', s => s.id === cl.subject_id);
-            const labObj = labs.find((l: any) => l.id === cl.default_lab_id || l.code === cl.default_lab_id);
-            const assignedUserId = facToUserMap.get(cl.faculty_id) || cl.faculty_id;
-            const assignedUser = assignedUserId ? users.find((u: any) => u.id === assignedUserId) : null;
-
+          if (!existing) {
             classesStore.push({
               id: cl.id,
               name: cl.name,
@@ -196,32 +263,46 @@ export const bootstrapAcademicData = async () => {
             });
           }
         }
+      }
 
-        // Overlay cached class offerings metadata (e.g. capacity, enrollmentPolicy) from Supabase system_settings
-        const { data: classCache } = await sb.from('system_settings').select('setting_value').eq('setting_key', 'academic_classes_cache').maybeSingle();
-        if (classCache && classCache.setting_value) {
-          try {
-            const cachedList = JSON.parse(classCache.setting_value);
-            if (Array.isArray(cachedList) && cachedList.length > 0) {
-              const classesStore = db.getStore('classes');
-              for (const cItem of cachedList) {
-                const existing = classesStore.find((x: any) => x.id === cItem.id);
-                if (existing) {
-                  Object.assign(existing, cItem);
-                } else {
-                  classesStore.push(cItem);
-                }
+      // Overlay cached class offerings metadata (e.g. capacity, enrollmentPolicy) from Supabase system_settings
+      const { data: classCache } = await sb.from('system_settings').select('setting_value').eq('setting_key', 'academic_classes_cache').maybeSingle();
+      if (classCache && classCache.setting_value) {
+        try {
+          const cachedList = JSON.parse(classCache.setting_value);
+          if (Array.isArray(cachedList) && cachedList.length > 0) {
+            const classesStore = db.getStore('classes');
+            for (const cItem of cachedList) {
+              if (db.isDeleted(cItem.id)) continue;
+              const existing = classesStore.find((x: any) => x.id === cItem.id);
+              if (existing) {
+                if (cItem.capacity) existing.capacity = cItem.capacity;
+                if (cItem.enrollmentPolicy) existing.enrollmentPolicy = cItem.enrollmentPolicy;
               }
             }
-          } catch {}
+          }
+        } catch {}
+      }
+
+      // Hydrate Students & Student Users from Supabase
+      const { data: supaStudents } = await sb.from('students').select('*').order('created_at');
+      if (Array.isArray(supaStudents)) {
+        const studentsStore = db.getStore('students');
+        const supaStudentIds = new Set(supaStudents.map(s => s.id));
+        const supaUserIds = new Set(supaStudents.map(s => s.user_id));
+
+        for (let i = studentsStore.length - 1; i >= 0; i--) {
+          const item = studentsStore[i];
+          if (db.isDeleted(item.id) || db.isDeleted(item.userId) || (item.studentId && db.isDeleted(item.studentId)) || (!supaStudentIds.has(item.id) && !supaUserIds.has(item.userId))) {
+            db.recordDeletion(item.id, 'STUDENT', { studentId: item.studentId, reason: 'DELETED_FROM_SUPABASE' });
+            studentsStore.splice(i, 1);
+          }
         }
 
-        // Hydrate Students & Student Users from Supabase
-        const { data: supaStudents } = await sb.from('students').select('*').order('created_at');
-        if (supaStudents && supaStudents.length > 0) {
-          const studentsStore = db.getStore('students');
-          studentsStore.length = 0;
-          for (const st of supaStudents) {
+        for (const st of supaStudents) {
+          if (db.isDeleted(st.id) || db.isDeleted(st.user_id) || db.isDeleted(st.student_id)) continue;
+          const existing = studentsStore.find(x => x.id === st.id || x.userId === st.user_id);
+          if (!existing) {
             studentsStore.push({
               id: st.id,
               userId: st.user_id,
@@ -237,26 +318,27 @@ export const bootstrapAcademicData = async () => {
             });
           }
         }
+      }
 
-        // Hydrate Class Student Enrollments from Supabase
-        const { data: supaClassStudents } = await sb.from('class_students').select('*');
-        if (supaClassStudents && supaClassStudents.length > 0) {
-          const csStore = db.getStore('class_students');
-          csStore.length = 0;
-          for (const cs of supaClassStudents) {
-            csStore.push({
-              id: cs.id,
-              classId: cs.class_id,
-              studentId: cs.student_id,
-              userId: cs.user_id,
-              enrolledAt: cs.enrolled_at || new Date().toISOString(),
-              status: cs.status || 'ACTIVE'
-            });
-          }
+      // Hydrate Class Student Enrollments from Supabase
+      const { data: supaClassStudents } = await sb.from('class_students').select('*');
+      if (Array.isArray(supaClassStudents)) {
+        const csStore = db.getStore('class_students');
+        csStore.length = 0;
+        for (const cs of supaClassStudents) {
+          if (db.isDeleted(cs.id) || db.isDeleted(cs.student_id) || db.isDeleted(cs.user_id) || db.isDeleted(cs.class_id)) continue;
+          csStore.push({
+            id: cs.id,
+            classId: cs.class_id,
+            studentId: cs.student_id,
+            userId: cs.user_id,
+            enrolledAt: cs.enrolled_at || new Date().toISOString(),
+            status: cs.status || 'ACTIVE'
+          });
         }
+      }
 
         // Academic sync completed
-      }
     } catch (err: any) {
       console.warn('[Academic Supabase] Cloud sync note:', err.message);
     }
@@ -276,10 +358,23 @@ export const getDepartments = async (req: AuthenticatedRequest, res: Response) =
   if (sb) {
     try {
       const { data: supaDepts, error } = await sb.from('academic_departments').select('*').order('code');
-      if (!error && supaDepts && supaDepts.length > 0) {
+      if (!error && Array.isArray(supaDepts)) {
         const store = db.getStore('departments');
+        const supaIds = new Set(supaDepts.map((d: any) => d.id));
+        const supaCodes = new Set(supaDepts.map((d: any) => (d.code || '').toUpperCase()));
+
+        // Purge if deleted in Supabase
+        for (let i = store.length - 1; i >= 0; i--) {
+          const item = store[i];
+          if (db.isDeleted(item.id) || db.isDeleted(item.code) || (!supaIds.has(item.id) && !supaCodes.has((item.code || '').toUpperCase()))) {
+            db.recordDeletion(item.id, 'DEPARTMENT', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+            store.splice(i, 1);
+          }
+        }
+
         for (const d of supaDepts) {
-          const idx = store.findIndex((x: any) => x.id === d.id || x.code === d.code);
+          if (db.isDeleted(d.id) || db.isDeleted(d.code)) continue;
+          const idx = store.findIndex((x: any) => x.id === d.id || x.code.toUpperCase() === d.code.toUpperCase());
           const item = {
             id: d.id,
             code: d.code,
@@ -300,7 +395,7 @@ export const getDepartments = async (req: AuthenticatedRequest, res: Response) =
   }
 
   const search = (req.query.search as string || '').toLowerCase().trim();
-  let depts: Department[] = db.getStore('departments');
+  let depts: Department[] = (db.getStore('departments') as Department[]).filter(d => !db.isDeleted(d.id) && !db.isDeleted(d.code));
 
   if (search) {
     depts = depts.filter((d) =>
@@ -434,7 +529,7 @@ export const deleteDepartment = async (req: AuthenticatedRequest, res: Response)
   if (index !== -1) {
     depts.splice(index, 1);
   }
-  db.recordDeletion(id, 'DEPARTMENT', { code: dept.code });
+  await recordCloudDeletion(id, 'DEPARTMENT', { code: dept.code });
   db.flush();
 
   // Remove from Supabase Cloud
@@ -461,12 +556,25 @@ export const getCourses = async (req: AuthenticatedRequest, res: Response) => {
   if (sb) {
     try {
       const { data: supaCourses, error } = await sb.from('academic_courses').select('*').order('code');
-      if (!error && supaCourses && supaCourses.length > 0) {
+      if (!error && Array.isArray(supaCourses)) {
         const depts = db.getStore('departments');
         const coursesStore = db.getStore('courses');
+        const supaIds = new Set(supaCourses.map((c: any) => c.id));
+        const supaCodes = new Set(supaCourses.map((c: any) => (c.code || '').toUpperCase()));
+
+        // Purge if deleted in Supabase
+        for (let i = coursesStore.length - 1; i >= 0; i--) {
+          const item = coursesStore[i];
+          if (db.isDeleted(item.id) || db.isDeleted(item.code) || (!supaIds.has(item.id) && !supaCodes.has((item.code || '').toUpperCase()))) {
+            db.recordDeletion(item.id, 'COURSE', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+            coursesStore.splice(i, 1);
+          }
+        }
+
         for (const c of supaCourses) {
+          if (db.isDeleted(c.id) || db.isDeleted(c.code)) continue;
           const dept = depts.find((d: any) => d.id === c.department_id || d.code === c.department_id);
-          const idx = coursesStore.findIndex((x: any) => x.id === c.id || x.code === c.code);
+          const idx = coursesStore.findIndex((x: any) => x.id === c.id || x.code.toUpperCase() === c.code.toUpperCase());
           const courseItem: Course = {
             id: c.id,
             code: c.code,
@@ -490,7 +598,7 @@ export const getCourses = async (req: AuthenticatedRequest, res: Response) => {
 
   const search = (req.query.search as string || '').toLowerCase().trim();
   const departmentId = req.query.departmentId as string;
-  let courses: Course[] = db.getStore('courses');
+  let courses: Course[] = (db.getStore('courses') as Course[]).filter(c => !db.isDeleted(c.id) && !db.isDeleted(c.code));
   const depts = db.getStore('departments');
 
   // Enhance courses with departmentCode if missing
@@ -651,7 +759,7 @@ export const deleteCourse = async (req: AuthenticatedRequest, res: Response) => 
   const courses = db.getStore('courses');
   const index = courses.findIndex((c) => c.id === id);
   if (index !== -1) courses.splice(index, 1);
-  db.recordDeletion(id, 'COURSE', { code: course.code });
+  await recordCloudDeletion(id, 'COURSE', { code: course.code });
   db.flush();
 
   const sb = getSupabase();
@@ -692,12 +800,25 @@ export const getSubjects = async (req: AuthenticatedRequest, res: Response) => {
   if (sb) {
     try {
       const { data: supaSubs, error } = await sb.from('subjects').select('*').order('code');
-      if (!error && supaSubs && supaSubs.length > 0) {
+      if (!error && Array.isArray(supaSubs)) {
         const subsStore = db.getStore('subjects');
         const depts = db.getStore('departments');
+        const supaIds = new Set(supaSubs.map((s: any) => s.id));
+        const supaCodes = new Set(supaSubs.map((s: any) => (s.code || '').toUpperCase()));
+
+        // Purge if deleted in Supabase
+        for (let i = subsStore.length - 1; i >= 0; i--) {
+          const item = subsStore[i];
+          if (db.isDeleted(item.id) || db.isDeleted(item.code) || (!supaIds.has(item.id) && !supaCodes.has((item.code || '').toUpperCase()))) {
+            db.recordDeletion(item.id, 'SUBJECT', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+            subsStore.splice(i, 1);
+          }
+        }
+
         for (const s of supaSubs) {
+          if (db.isDeleted(s.id) || db.isDeleted(s.code)) continue;
           const deptObj = depts.find((d: any) => d.code === s.department || d.id === s.department_id);
-          const idx = subsStore.findIndex((x: any) => x.id === s.id || x.code === s.code);
+          const idx = subsStore.findIndex((x: any) => x.id === s.id || x.code.toUpperCase() === s.code.toUpperCase());
           const item: Subject = {
             id: s.id,
             code: s.code,
@@ -720,7 +841,7 @@ export const getSubjects = async (req: AuthenticatedRequest, res: Response) => {
     }
   }
 
-  let subjects: Subject[] = db.getStore('subjects');
+  let subjects: Subject[] = (db.getStore('subjects') as Subject[]).filter(s => !db.isDeleted(s.id) && !db.isDeleted(s.code));
   const depts = db.getStore('departments');
 
   subjects = subjects.map((s) => {
@@ -858,7 +979,7 @@ export const deleteSubject = async (req: AuthenticatedRequest, res: Response) =>
   const subjects = db.getStore('subjects');
   const index = subjects.findIndex((s) => s.id === id);
   if (index !== -1) subjects.splice(index, 1);
-  db.recordDeletion(id, 'SUBJECT', { code: subject.code });
+  await recordCloudDeletion(id, 'SUBJECT', { code: subject.code });
   db.flush();
 
   const sb = getSupabase();
@@ -881,11 +1002,24 @@ export const getAcademicYears = async (_req: AuthenticatedRequest, res: Response
   const sb = getSupabase();
   if (sb) {
     try {
-      const { data: supaYears } = await sb.from('academic_years').select('*').order('year_code');
-      if (supaYears && supaYears.length > 0) {
+      const { data: supaYears, error } = await sb.from('academic_years').select('*').order('year_code');
+      if (!error && Array.isArray(supaYears)) {
         const yearsStore = db.getStore('academic_years');
+        const supaIds = new Set(supaYears.map((y: any) => y.id));
+        const supaCodes = new Set(supaYears.map((y: any) => (y.year_code || '').toUpperCase()));
+
+        // Purge if deleted in Supabase
+        for (let i = yearsStore.length - 1; i >= 0; i--) {
+          const item = yearsStore[i];
+          if (db.isDeleted(item.id) || db.isDeleted(item.year) || (!supaIds.has(item.id) && !supaCodes.has((item.year || '').toUpperCase()))) {
+            db.recordDeletion(item.id, 'ACADEMIC_YEAR', { year: item.year, reason: 'DELETED_FROM_SUPABASE' });
+            yearsStore.splice(i, 1);
+          }
+        }
+
         for (const y of supaYears) {
-          const idx = yearsStore.findIndex((x: any) => x.id === y.id || x.year === y.year_code);
+          if (db.isDeleted(y.id) || db.isDeleted(y.year_code)) continue;
+          const idx = yearsStore.findIndex((x: any) => x.id === y.id || x.year.toUpperCase() === y.year_code.toUpperCase());
           const item: AcademicYear = {
             id: y.id,
             year: y.year_code,
@@ -905,7 +1039,7 @@ export const getAcademicYears = async (_req: AuthenticatedRequest, res: Response
       console.warn('[Academic Supabase] Fetch years error:', e.message);
     }
   }
-  const years: AcademicYear[] = db.getStore('academic_years');
+  const years: AcademicYear[] = (db.getStore('academic_years') as AcademicYear[]).filter(y => !db.isDeleted(y.id) && !db.isDeleted(y.year));
   return res.json({ success: true, data: years });
 };
 
@@ -1012,7 +1146,7 @@ export const deleteAcademicYear = async (req: AuthenticatedRequest, res: Respons
   const years = db.getStore('academic_years');
   const index = years.findIndex((item) => item.id === id);
   if (index !== -1) years.splice(index, 1);
-  db.recordDeletion(id, 'ACADEMIC_YEAR', { year: y.year });
+  await recordCloudDeletion(id, 'ACADEMIC_YEAR', { year: y.year });
   db.flush();
 
   const sb = getSupabase();
@@ -1109,7 +1243,7 @@ export const deleteSection = async (req: AuthenticatedRequest, res: Response) =>
   const sections = db.getStore('sections');
   const index = sections.findIndex((s) => s.id === id);
   if (index !== -1) sections.splice(index, 1);
-  db.recordDeletion(id, 'SECTION', { name: section.name });
+  await recordCloudDeletion(id, 'SECTION', { name: section.name });
   db.flush();
 
   const sb = getSupabase();
@@ -1117,7 +1251,7 @@ export const deleteSection = async (req: AuthenticatedRequest, res: Response) =>
     try {
       await sb.from('system_settings').upsert({
         setting_key: 'academic_sections',
-        setting_value: JSON.stringify(sections),
+        setting_value: JSON.stringify(sections.filter(s => !db.isDeleted(s.id) && !db.isDeleted(s.name))),
         description: 'Persistent list of institutional sections',
         updated_at: new Date().toISOString()
       }, { onConflict: 'setting_key' });
@@ -1133,9 +1267,29 @@ export const deleteSection = async (req: AuthenticatedRequest, res: Response) =>
 // 6. Academic Classes CRUD
 // ============================================================================
 export const getClasses = async (req: AuthenticatedRequest, res: Response) => {
-  bootstrapAcademicData();
+  await bootstrapAcademicData();
+
+  const sb = getSupabase();
+  if (sb) {
+    try {
+      const { data: supaClasses, error } = await sb.from('academic_classes').select('*').order('name');
+      if (!error && Array.isArray(supaClasses)) {
+        const classesStore = db.getStore('classes');
+        const supaClassIds = new Set(supaClasses.map((cl: any) => cl.id));
+
+        for (let i = classesStore.length - 1; i >= 0; i--) {
+          const item = classesStore[i];
+          if (db.isDeleted(item.id) || !supaClassIds.has(item.id)) {
+            db.recordDeletion(item.id, 'CLASS', { name: item.name, reason: 'DELETED_FROM_SUPABASE' });
+            classesStore.splice(i, 1);
+          }
+        }
+      }
+    } catch {}
+  }
+
   const user = req.user!;
-  let classes: ClassEntity[] = db.getStore('classes');
+  let classes: ClassEntity[] = (db.getStore('classes') as ClassEntity[]).filter(c => !db.isDeleted(c.id));
   const courses = db.getStore('courses');
   const subjects = db.getStore('subjects');
   const users = db.getStore('users');
@@ -1429,7 +1583,7 @@ export const deleteClass = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   db.delete('classes', (item: any) => item.id === id);
-  db.recordDeletion(id, 'CLASS', { name: cl.name });
+  await recordCloudDeletion(id, 'CLASS', { name: cl.name });
   db.flush();
 
   // Cascade delete in-memory class student assignments
@@ -1440,7 +1594,7 @@ export const deleteClass = async (req: AuthenticatedRequest, res: Response) => {
     try {
       await sb.from('student_class_assignments').delete().eq('class_id', id);
       await sb.from('academic_classes').delete().eq('id', id);
-      const allClasses = db.getStore('classes');
+      const allClasses = db.getStore('classes').filter((c: any) => !db.isDeleted(c.id));
       await sb.from('system_settings').upsert({
         setting_key: 'academic_classes_cache',
         setting_value: JSON.stringify(allClasses),

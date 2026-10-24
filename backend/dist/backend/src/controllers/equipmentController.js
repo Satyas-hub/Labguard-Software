@@ -27,6 +27,7 @@ exports.ensureEquipmentSeeded = ensureEquipmentSeeded;
 const getEquipment = async (req, res) => {
     (0, exports.ensureEquipmentSeeded)();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
+    await (0, supabaseSyncHelper_1.syncCloudTombstones)();
     if (sb) {
         try {
             const { data: supaEquip, error } = await sb.from('equipment').select('*').order('asset_id');
@@ -34,6 +35,8 @@ const getEquipment = async (req, res) => {
                 const equipStore = pool_1.db.getStore('equipment');
                 equipStore.length = 0;
                 for (const eq of supaEquip) {
+                    if (pool_1.db.isDeleted(eq.id) || (eq.asset_id && pool_1.db.isDeleted(eq.asset_id)))
+                        continue;
                     equipStore.push({
                         id: eq.id,
                         assetTag: eq.asset_id,
@@ -516,8 +519,7 @@ const deleteEquipment = async (req, res) => {
     }
     // Remove equipment permanently from store
     pool_1.db.delete('equipment', (e) => e.id === item.id);
-    pool_1.db.recordDeletion(item.id, 'EQUIPMENT', { assetTag: item.assetTag });
-    pool_1.db.flush();
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(item.id, 'EQUIPMENT', { assetTag: item.assetTag });
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {

@@ -22,7 +22,7 @@ import {
   Lab
 } from '../../../shared/types';
 
-import { getSupabase } from '../db/supabaseSyncHelper';
+import { getSupabase, syncCloudTombstones, recordCloudDeletion } from '../db/supabaseSyncHelper';
 
 /**
  * Ensures clean initial equipment state. Demo equipment seeding is disabled.
@@ -40,6 +40,7 @@ export const getEquipment = async (req: AuthenticatedRequest, res: Response) => 
   ensureEquipmentSeeded();
 
   const sb = getSupabase();
+  await syncCloudTombstones();
   if (sb) {
     try {
       const { data: supaEquip, error } = await sb.from('equipment').select('*').order('asset_id');
@@ -47,6 +48,7 @@ export const getEquipment = async (req: AuthenticatedRequest, res: Response) => 
         const equipStore = db.getStore('equipment');
         equipStore.length = 0;
         for (const eq of supaEquip) {
+          if (db.isDeleted(eq.id) || (eq.asset_id && db.isDeleted(eq.asset_id))) continue;
           equipStore.push({
             id: eq.id,
             assetTag: eq.asset_id,
@@ -609,8 +611,7 @@ export const deleteEquipment = async (req: AuthenticatedRequest, res: Response) 
 
   // Remove equipment permanently from store
   db.delete('equipment', (e: Equipment) => e.id === item.id);
-  db.recordDeletion(item.id, 'EQUIPMENT', { assetTag: item.assetTag });
-  db.flush();
+  await recordCloudDeletion(item.id, 'EQUIPMENT', { assetTag: item.assetTag });
 
   const sb = getSupabase();
   if (sb) {

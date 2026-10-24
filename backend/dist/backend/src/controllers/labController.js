@@ -44,25 +44,45 @@ function parseCapacityAndDescription(description, fallbackCapacity = 40, fallbac
  */
 function syncComputersFromSupabase(supaPcs, labsStore) {
     const pcStore = pool_1.db.getStore('computers');
-    pcStore.length = 0; // Clear memory store to match Supabase source of truth
+    const supaPcIds = new Set(supaPcs.map(p => p.id));
+    const supaPcCodes = new Set(supaPcs.map(p => (p.pc_code || '').toUpperCase()));
+    // Purge any local computer that was deleted in Supabase or tombstoned
+    if (Array.isArray(supaPcs)) {
+        const purged = pcStore.filter(c => {
+            if (pool_1.db.isDeleted(c.id) || (c.pcCode && pool_1.db.isDeleted(c.pcCode)))
+                return false;
+            if (!supaPcIds.has(c.id) && !supaPcCodes.has((c.pcCode || '').toUpperCase())) {
+                pool_1.db.recordDeletion(c.id, 'COMPUTER', { pcCode: c.pcCode, reason: 'DELETED_FROM_SUPABASE' });
+                return false;
+            }
+            return true;
+        });
+        pcStore.length = 0;
+        pcStore.push(...purged);
+    }
     for (const p of supaPcs) {
+        if (pool_1.db.isDeleted(p.id) || (p.pc_code && pool_1.db.isDeleted(p.pc_code)))
+            continue;
         const labObj = labsStore.find((l) => l.id === p.lab_id || l.code?.toUpperCase() === p.lab_code?.toUpperCase());
-        const pcData = {
-            id: p.id,
-            labId: p.lab_id,
-            labCode: labObj ? labObj.code : (p.lab_code || 'UNASSIGNED'),
-            pcCode: p.pc_code,
-            hostname: p.hostname || `${labObj?.code || 'WORKSTATION'}-${p.pc_code}`,
-            ipAddress: p.ip_address || undefined,
-            macAddress: p.mac_address || undefined,
-            clientId: p.bound_client_id || undefined,
-            state: (p.status || 'AVAILABLE'),
-            isOnline: p.is_online !== false,
-            lastHeartbeat: p.last_heartbeat,
-            createdAt: p.created_at || new Date().toISOString(),
-            updatedAt: p.updated_at || new Date().toISOString()
-        };
-        pcStore.push(pcData);
+        const existing = pcStore.find(ep => ep.id === p.id || (ep.pcCode.toUpperCase() === p.pc_code?.toUpperCase() && ep.labCode?.toUpperCase() === labObj?.code?.toUpperCase()));
+        if (!existing) {
+            const pcData = {
+                id: p.id,
+                labId: p.lab_id,
+                labCode: labObj ? labObj.code : (p.lab_code || 'UNASSIGNED'),
+                pcCode: p.pc_code,
+                hostname: p.hostname || `${labObj?.code || 'WORKSTATION'}-${p.pc_code}`,
+                ipAddress: p.ip_address || undefined,
+                macAddress: p.mac_address || undefined,
+                clientId: p.bound_client_id || undefined,
+                state: (p.status || 'AVAILABLE'),
+                isOnline: p.is_online !== false,
+                lastHeartbeat: p.last_heartbeat,
+                createdAt: p.created_at || new Date().toISOString(),
+                updatedAt: p.updated_at || new Date().toISOString()
+            };
+            pcStore.push(pcData);
+        }
     }
 }
 /**
@@ -141,35 +161,54 @@ const ensureLabsSeeded = async () => {
         return;
     hasEnsuredLabs = true;
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
-    const alreadyBootstrapped = await (0, supabaseSyncHelper_1.isInstitutionBootstrapped)();
+    await (0, supabaseSyncHelper_1.syncCloudTombstones)();
     if (sb) {
         try {
             const { data: supaLabs } = await sb.from('labs').select('*').order('code');
             if (supaLabs) {
                 const store = pool_1.db.getStore('labs');
-                store.length = 0;
-                for (const l of supaLabs) {
-                    const { capacity, building, description } = parseCapacityAndDescription(l.description, l.capacity || 40, l.building || 'Main Campus');
-                    store.push({
-                        id: l.id,
-                        code: l.code,
-                        name: l.name,
-                        room: l.room,
-                        building: building || l.building || 'Main Campus',
-                        description,
-                        capacity,
-                        status: l.status || 'ACTIVE',
-                        pcCount: l.pc_count || 0,
-                        createdAt: l.created_at || new Date().toISOString(),
-                        updatedAt: l.updated_at || new Date().toISOString()
+                const supaLabIds = new Set(supaLabs.map(l => l.id));
+                const supaLabCodes = new Set(supaLabs.map(l => (l.code || '').toUpperCase()));
+                // Bidirectional deletion sync:
+                // If an administrator deleted a lab in Supabase directly, purge it from local store!
+                if (Array.isArray(supaLabs)) {
+                    const purged = store.filter(l => {
+                        if (pool_1.db.isDeleted(l.id) || (l.code && pool_1.db.isDeleted(l.code)))
+                            return false;
+                        if (!supaLabIds.has(l.id) && !supaLabCodes.has((l.code || '').toUpperCase())) {
+                            pool_1.db.recordDeletion(l.id, 'LAB', { code: l.code, reason: 'DELETED_FROM_SUPABASE' });
+                            return false;
+                        }
+                        return true;
                     });
+                    store.length = 0;
+                    store.push(...purged);
+                }
+                for (const l of supaLabs) {
+                    if (pool_1.db.isDeleted(l.id) || (l.code && pool_1.db.isDeleted(l.code)))
+                        continue;
+                    const { capacity, building, description } = parseCapacityAndDescription(l.description, l.capacity || 40, l.building || 'Main Campus');
+                    const existing = store.find((el) => el.id === l.id || el.code.toUpperCase() === l.code.toUpperCase());
+                    if (!existing) {
+                        store.push({
+                            id: l.id,
+                            code: l.code,
+                            name: l.name,
+                            room: l.room,
+                            building: building || l.building || 'Main Campus',
+                            description,
+                            capacity,
+                            status: l.status || 'ACTIVE',
+                            pcCount: l.pc_count || 0,
+                            createdAt: l.created_at || new Date().toISOString(),
+                            updatedAt: l.updated_at || new Date().toISOString()
+                        });
+                    }
                 }
                 const { data: supaPcs } = await sb.from('computers').select('*').order('pc_code');
                 if (supaPcs) {
                     syncComputersFromSupabase(supaPcs, store);
                 }
-                // Workstations are only registered when configured via login screen / registration modal.
-                // No dummy workstations are auto-provisioned.
             }
         }
         catch (err) {
@@ -345,6 +384,8 @@ const getAvailableLabsForRegistration = async (_req, res) => {
                 const store = pool_1.db.getStore('labs');
                 store.length = 0;
                 for (const sl of supaLabs) {
+                    if (pool_1.db.isDeleted(sl.id) || (sl.code && pool_1.db.isDeleted(sl.code)))
+                        continue;
                     const { capacity, building, description } = parseCapacityAndDescription(sl.description, sl.capacity || 40, sl.building || 'Main Campus');
                     store.push({
                         id: sl.id,
@@ -395,6 +436,8 @@ const getLabs = async (req, res) => {
                 const store = pool_1.db.getStore('labs');
                 store.length = 0;
                 for (const l of supaLabs) {
+                    if (pool_1.db.isDeleted(l.id) || (l.code && pool_1.db.isDeleted(l.code)))
+                        continue;
                     const { capacity, building, description } = parseCapacityAndDescription(l.description, l.capacity || 40, l.building || 'Main Campus');
                     store.push({
                         id: l.id,
@@ -703,8 +746,7 @@ const deleteLab = async (req, res) => {
     }
     // Safe to delete - permanently remove from store
     pool_1.db.delete('labs', (l) => l.id === lab.id);
-    pool_1.db.recordDeletion(lab.id, 'LAB', { code: lab.code, name: lab.name });
-    pool_1.db.flush();
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(lab.id, 'LAB', { code: lab.code, name: lab.name });
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
@@ -1276,8 +1318,7 @@ const deleteComputer = async (req, res) => {
     }
     // Remove pc permanently from store
     pool_1.db.delete('computers', (c) => c.id === pc.id);
-    pool_1.db.recordDeletion(pc.id, 'COMPUTER', { pcCode: pc.pcCode, labCode: pc.labCode });
-    pool_1.db.flush();
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(pc.id, 'COMPUTER', { pcCode: pc.pcCode, labCode: pc.labCode });
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {

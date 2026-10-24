@@ -53,32 +53,57 @@ const bootstrapAcademicData = async () => {
         return;
     hasBootstrappedAcademic = true;
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
-    const alreadyBootstrapped = await (0, supabaseSyncHelper_1.isInstitutionBootstrapped)();
+    await (0, supabaseSyncHelper_1.syncCloudTombstones)();
     if (sb) {
         try {
             const { data: supaDepts } = await sb.from('academic_departments').select('*').order('code');
-            if (supaDepts && supaDepts.length > 0) {
+            if (Array.isArray(supaDepts)) {
                 const deptsStore = pool_1.db.getStore('departments');
-                deptsStore.length = 0;
-                for (const d of supaDepts) {
-                    if (pool_1.db.isDeleted(d.id))
-                        continue;
-                    deptsStore.push({
-                        id: d.id,
-                        code: d.code,
-                        name: d.name,
-                        description: d.description || '',
-                        createdAt: d.created_at || new Date().toISOString()
-                    });
+                const supaDeptIds = new Set(supaDepts.map(d => d.id));
+                const supaDeptCodes = new Set(supaDepts.map(d => (d.code || '').toUpperCase()));
+                // Bidirectional purge: if deleted from Supabase, remove locally
+                for (let i = deptsStore.length - 1; i >= 0; i--) {
+                    const item = deptsStore[i];
+                    if (pool_1.db.isDeleted(item.id) || pool_1.db.isDeleted(item.code) || (!supaDeptIds.has(item.id) && !supaDeptCodes.has((item.code || '').toUpperCase()))) {
+                        pool_1.db.recordDeletion(item.id, 'DEPARTMENT', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+                        deptsStore.splice(i, 1);
+                    }
                 }
-                const { data: supaCourses } = await sb.from('academic_courses').select('*').order('code');
-                if (supaCourses && supaCourses.length > 0) {
-                    const coursesStore = pool_1.db.getStore('courses');
-                    coursesStore.length = 0;
-                    for (const c of supaCourses) {
-                        if (pool_1.db.isDeleted(c.id))
-                            continue;
-                        const deptObj = deptsStore.find(x => x.id === c.department_id);
+                for (const d of supaDepts) {
+                    if (pool_1.db.isDeleted(d.id) || pool_1.db.isDeleted(d.code))
+                        continue;
+                    const existing = deptsStore.find(x => x.id === d.id || x.code.toUpperCase() === d.code.toUpperCase());
+                    if (!existing) {
+                        deptsStore.push({
+                            id: d.id,
+                            code: d.code,
+                            name: d.name,
+                            description: d.description || '',
+                            createdAt: d.created_at || new Date().toISOString()
+                        });
+                    }
+                }
+            }
+            const { data: supaCourses } = await sb.from('academic_courses').select('*').order('code');
+            if (Array.isArray(supaCourses)) {
+                const coursesStore = pool_1.db.getStore('courses');
+                const deptsStore = pool_1.db.getStore('departments');
+                const supaCourseIds = new Set(supaCourses.map(c => c.id));
+                const supaCourseCodes = new Set(supaCourses.map(c => (c.code || '').toUpperCase()));
+                // Bidirectional purge: if deleted from Supabase, remove locally
+                for (let i = coursesStore.length - 1; i >= 0; i--) {
+                    const item = coursesStore[i];
+                    if (pool_1.db.isDeleted(item.id) || pool_1.db.isDeleted(item.code) || (!supaCourseIds.has(item.id) && !supaCourseCodes.has((item.code || '').toUpperCase()))) {
+                        pool_1.db.recordDeletion(item.id, 'COURSE', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+                        coursesStore.splice(i, 1);
+                    }
+                }
+                for (const c of supaCourses) {
+                    if (pool_1.db.isDeleted(c.id) || pool_1.db.isDeleted(c.code))
+                        continue;
+                    const deptObj = deptsStore.find(x => x.id === c.department_id);
+                    const existing = coursesStore.find(x => x.id === c.id || x.code.toUpperCase() === c.code.toUpperCase());
+                    if (!existing) {
                         coursesStore.push({
                             id: c.id,
                             code: c.code,
@@ -90,14 +115,26 @@ const bootstrapAcademicData = async () => {
                         });
                     }
                 }
-                const { data: supaSubs } = await sb.from('subjects').select('*').order('code');
-                if (supaSubs && supaSubs.length > 0) {
-                    const subsStore = pool_1.db.getStore('subjects');
-                    subsStore.length = 0;
-                    for (const s of supaSubs) {
-                        if (pool_1.db.isDeleted(s.id))
-                            continue;
-                        const deptObj = deptsStore.find(x => x.code === s.department);
+            }
+            const { data: supaSubs } = await sb.from('subjects').select('*').order('code');
+            if (Array.isArray(supaSubs)) {
+                const subsStore = pool_1.db.getStore('subjects');
+                const deptsStore = pool_1.db.getStore('departments');
+                const supaSubIds = new Set(supaSubs.map(s => s.id));
+                const supaSubCodes = new Set(supaSubs.map(s => (s.code || '').toUpperCase()));
+                for (let i = subsStore.length - 1; i >= 0; i--) {
+                    const item = subsStore[i];
+                    if (pool_1.db.isDeleted(item.id) || pool_1.db.isDeleted(item.code) || (!supaSubIds.has(item.id) && !supaSubCodes.has((item.code || '').toUpperCase()))) {
+                        pool_1.db.recordDeletion(item.id, 'SUBJECT', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+                        subsStore.splice(i, 1);
+                    }
+                }
+                for (const s of supaSubs) {
+                    if (pool_1.db.isDeleted(s.id) || pool_1.db.isDeleted(s.code))
+                        continue;
+                    const deptObj = deptsStore.find(x => x.code === s.department);
+                    const existing = subsStore.find(x => x.id === s.id || x.code.toUpperCase() === s.code.toUpperCase());
+                    if (!existing) {
                         subsStore.push({
                             id: s.id,
                             code: s.code,
@@ -110,14 +147,25 @@ const bootstrapAcademicData = async () => {
                         });
                     }
                 }
-                // Hydrate Academic Years from Supabase
-                const { data: supaYears } = await sb.from('academic_years').select('*').order('year_code');
-                if (supaYears && supaYears.length > 0) {
-                    const yearsStore = pool_1.db.getStore('academic_years');
-                    yearsStore.length = 0;
-                    for (const y of supaYears) {
-                        if (pool_1.db.isDeleted(y.id))
-                            continue;
+            }
+            // Hydrate Academic Years from Supabase
+            const { data: supaYears } = await sb.from('academic_years').select('*').order('year_code');
+            if (Array.isArray(supaYears)) {
+                const yearsStore = pool_1.db.getStore('academic_years');
+                const supaYearIds = new Set(supaYears.map(y => y.id));
+                const supaYearCodes = new Set(supaYears.map(y => (y.year_code || '').toUpperCase()));
+                for (let i = yearsStore.length - 1; i >= 0; i--) {
+                    const item = yearsStore[i];
+                    if (pool_1.db.isDeleted(item.id) || pool_1.db.isDeleted(item.year) || (!supaYearIds.has(item.id) && !supaYearCodes.has((item.year || '').toUpperCase()))) {
+                        pool_1.db.recordDeletion(item.id, 'ACADEMIC_YEAR', { year: item.year, reason: 'DELETED_FROM_SUPABASE' });
+                        yearsStore.splice(i, 1);
+                    }
+                }
+                for (const y of supaYears) {
+                    if (pool_1.db.isDeleted(y.id) || pool_1.db.isDeleted(y.year_code))
+                        continue;
+                    const existing = yearsStore.find(x => x.id === y.id || x.year.toUpperCase() === y.year_code.toUpperCase());
+                    if (!existing) {
                         yearsStore.push({
                             id: y.id,
                             year: y.year_code,
@@ -128,35 +176,51 @@ const bootstrapAcademicData = async () => {
                         });
                     }
                 }
-                // Hydrate Sections from Supabase system_settings / sections
-                const { data: secSetting } = await sb.from('system_settings').select('setting_value').eq('setting_key', 'academic_sections').maybeSingle();
-                if (secSetting && secSetting.setting_value) {
-                    try {
-                        const parsedSecs = JSON.parse(secSetting.setting_value);
-                        if (Array.isArray(parsedSecs) && parsedSecs.length > 0) {
-                            const secStore = pool_1.db.getStore('sections');
-                            secStore.length = 0;
-                            secStore.push(...parsedSecs);
+            }
+            // Hydrate Sections from Supabase system_settings / sections
+            const { data: secSetting } = await sb.from('system_settings').select('setting_value').eq('setting_key', 'academic_sections').maybeSingle();
+            if (secSetting && secSetting.setting_value) {
+                try {
+                    const parsedSecs = JSON.parse(secSetting.setting_value);
+                    if (Array.isArray(parsedSecs)) {
+                        const secStore = pool_1.db.getStore('sections');
+                        secStore.length = 0;
+                        for (const s of parsedSecs) {
+                            if (pool_1.db.isDeleted(s.id) || pool_1.db.isDeleted(s.name))
+                                continue;
+                            secStore.push(s);
                         }
                     }
-                    catch { }
                 }
-                // Hydrate Faculty Mapping for Foreign Key resolution
-                const { data: supaFacultyList } = await sb.from('faculty').select('id, user_id');
-                const facToUserMap = new Map((supaFacultyList || []).map((f) => [f.id, f.user_id]));
-                // Hydrate Academic Classes from Supabase
-                const { data: supaClasses } = await sb.from('academic_classes').select('*').order('name');
-                if (supaClasses && supaClasses.length > 0) {
-                    const classesStore = pool_1.db.getStore('classes');
-                    classesStore.length = 0;
-                    const labs = pool_1.db.getStore('labs');
-                    const users = pool_1.db.getStore('users');
-                    for (const cl of supaClasses) {
-                        const courseObj = pool_1.db.findOne('courses', c => c.id === cl.course_id);
-                        const subjectObj = pool_1.db.findOne('subjects', s => s.id === cl.subject_id);
-                        const labObj = labs.find((l) => l.id === cl.default_lab_id || l.code === cl.default_lab_id);
-                        const assignedUserId = facToUserMap.get(cl.faculty_id) || cl.faculty_id;
-                        const assignedUser = assignedUserId ? users.find((u) => u.id === assignedUserId) : null;
+                catch { }
+            }
+            // Hydrate Faculty Mapping for Foreign Key resolution
+            const { data: supaFacultyList } = await sb.from('faculty').select('id, user_id');
+            const facToUserMap = new Map((supaFacultyList || []).map((f) => [f.id, f.user_id]));
+            // Hydrate Academic Classes from Supabase
+            const { data: supaClasses } = await sb.from('academic_classes').select('*').order('name');
+            if (Array.isArray(supaClasses)) {
+                const classesStore = pool_1.db.getStore('classes');
+                const labs = pool_1.db.getStore('labs');
+                const users = pool_1.db.getStore('users');
+                const supaClassIds = new Set(supaClasses.map(cl => cl.id));
+                for (let i = classesStore.length - 1; i >= 0; i--) {
+                    const item = classesStore[i];
+                    if (pool_1.db.isDeleted(item.id) || !supaClassIds.has(item.id)) {
+                        pool_1.db.recordDeletion(item.id, 'CLASS', { name: item.name, reason: 'DELETED_FROM_SUPABASE' });
+                        classesStore.splice(i, 1);
+                    }
+                }
+                for (const cl of supaClasses) {
+                    if (pool_1.db.isDeleted(cl.id))
+                        continue;
+                    const courseObj = pool_1.db.findOne('courses', c => c.id === cl.course_id);
+                    const subjectObj = pool_1.db.findOne('subjects', s => s.id === cl.subject_id);
+                    const labObj = labs.find((l) => l.id === cl.default_lab_id || l.code === cl.default_lab_id);
+                    const assignedUserId = facToUserMap.get(cl.faculty_id) || cl.faculty_id;
+                    const assignedUser = assignedUserId ? users.find((u) => u.id === assignedUserId) : null;
+                    const existing = classesStore.find(x => x.id === cl.id);
+                    if (!existing) {
                         classesStore.push({
                             id: cl.id,
                             name: cl.name,
@@ -179,32 +243,47 @@ const bootstrapAcademicData = async () => {
                         });
                     }
                 }
-                // Overlay cached class offerings metadata (e.g. capacity, enrollmentPolicy) from Supabase system_settings
-                const { data: classCache } = await sb.from('system_settings').select('setting_value').eq('setting_key', 'academic_classes_cache').maybeSingle();
-                if (classCache && classCache.setting_value) {
-                    try {
-                        const cachedList = JSON.parse(classCache.setting_value);
-                        if (Array.isArray(cachedList) && cachedList.length > 0) {
-                            const classesStore = pool_1.db.getStore('classes');
-                            for (const cItem of cachedList) {
-                                const existing = classesStore.find((x) => x.id === cItem.id);
-                                if (existing) {
-                                    Object.assign(existing, cItem);
-                                }
-                                else {
-                                    classesStore.push(cItem);
-                                }
+            }
+            // Overlay cached class offerings metadata (e.g. capacity, enrollmentPolicy) from Supabase system_settings
+            const { data: classCache } = await sb.from('system_settings').select('setting_value').eq('setting_key', 'academic_classes_cache').maybeSingle();
+            if (classCache && classCache.setting_value) {
+                try {
+                    const cachedList = JSON.parse(classCache.setting_value);
+                    if (Array.isArray(cachedList) && cachedList.length > 0) {
+                        const classesStore = pool_1.db.getStore('classes');
+                        for (const cItem of cachedList) {
+                            if (pool_1.db.isDeleted(cItem.id))
+                                continue;
+                            const existing = classesStore.find((x) => x.id === cItem.id);
+                            if (existing) {
+                                if (cItem.capacity)
+                                    existing.capacity = cItem.capacity;
+                                if (cItem.enrollmentPolicy)
+                                    existing.enrollmentPolicy = cItem.enrollmentPolicy;
                             }
                         }
                     }
-                    catch { }
                 }
-                // Hydrate Students & Student Users from Supabase
-                const { data: supaStudents } = await sb.from('students').select('*').order('created_at');
-                if (supaStudents && supaStudents.length > 0) {
-                    const studentsStore = pool_1.db.getStore('students');
-                    studentsStore.length = 0;
-                    for (const st of supaStudents) {
+                catch { }
+            }
+            // Hydrate Students & Student Users from Supabase
+            const { data: supaStudents } = await sb.from('students').select('*').order('created_at');
+            if (Array.isArray(supaStudents)) {
+                const studentsStore = pool_1.db.getStore('students');
+                const supaStudentIds = new Set(supaStudents.map(s => s.id));
+                const supaUserIds = new Set(supaStudents.map(s => s.user_id));
+                for (let i = studentsStore.length - 1; i >= 0; i--) {
+                    const item = studentsStore[i];
+                    if (pool_1.db.isDeleted(item.id) || pool_1.db.isDeleted(item.userId) || (item.studentId && pool_1.db.isDeleted(item.studentId)) || (!supaStudentIds.has(item.id) && !supaUserIds.has(item.userId))) {
+                        pool_1.db.recordDeletion(item.id, 'STUDENT', { studentId: item.studentId, reason: 'DELETED_FROM_SUPABASE' });
+                        studentsStore.splice(i, 1);
+                    }
+                }
+                for (const st of supaStudents) {
+                    if (pool_1.db.isDeleted(st.id) || pool_1.db.isDeleted(st.user_id) || pool_1.db.isDeleted(st.student_id))
+                        continue;
+                    const existing = studentsStore.find(x => x.id === st.id || x.userId === st.user_id);
+                    if (!existing) {
                         studentsStore.push({
                             id: st.id,
                             userId: st.user_id,
@@ -220,24 +299,26 @@ const bootstrapAcademicData = async () => {
                         });
                     }
                 }
-                // Hydrate Class Student Enrollments from Supabase
-                const { data: supaClassStudents } = await sb.from('class_students').select('*');
-                if (supaClassStudents && supaClassStudents.length > 0) {
-                    const csStore = pool_1.db.getStore('class_students');
-                    csStore.length = 0;
-                    for (const cs of supaClassStudents) {
-                        csStore.push({
-                            id: cs.id,
-                            classId: cs.class_id,
-                            studentId: cs.student_id,
-                            userId: cs.user_id,
-                            enrolledAt: cs.enrolled_at || new Date().toISOString(),
-                            status: cs.status || 'ACTIVE'
-                        });
-                    }
-                }
-                // Academic sync completed
             }
+            // Hydrate Class Student Enrollments from Supabase
+            const { data: supaClassStudents } = await sb.from('class_students').select('*');
+            if (Array.isArray(supaClassStudents)) {
+                const csStore = pool_1.db.getStore('class_students');
+                csStore.length = 0;
+                for (const cs of supaClassStudents) {
+                    if (pool_1.db.isDeleted(cs.id) || pool_1.db.isDeleted(cs.student_id) || pool_1.db.isDeleted(cs.user_id) || pool_1.db.isDeleted(cs.class_id))
+                        continue;
+                    csStore.push({
+                        id: cs.id,
+                        classId: cs.class_id,
+                        studentId: cs.student_id,
+                        userId: cs.user_id,
+                        enrolledAt: cs.enrolled_at || new Date().toISOString(),
+                        status: cs.status || 'ACTIVE'
+                    });
+                }
+            }
+            // Academic sync completed
         }
         catch (err) {
             console.warn('[Academic Supabase] Cloud sync note:', err.message);
@@ -256,10 +337,22 @@ const getDepartments = async (req, res) => {
     if (sb) {
         try {
             const { data: supaDepts, error } = await sb.from('academic_departments').select('*').order('code');
-            if (!error && supaDepts && supaDepts.length > 0) {
+            if (!error && Array.isArray(supaDepts)) {
                 const store = pool_1.db.getStore('departments');
+                const supaIds = new Set(supaDepts.map((d) => d.id));
+                const supaCodes = new Set(supaDepts.map((d) => (d.code || '').toUpperCase()));
+                // Purge if deleted in Supabase
+                for (let i = store.length - 1; i >= 0; i--) {
+                    const item = store[i];
+                    if (pool_1.db.isDeleted(item.id) || pool_1.db.isDeleted(item.code) || (!supaIds.has(item.id) && !supaCodes.has((item.code || '').toUpperCase()))) {
+                        pool_1.db.recordDeletion(item.id, 'DEPARTMENT', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+                        store.splice(i, 1);
+                    }
+                }
                 for (const d of supaDepts) {
-                    const idx = store.findIndex((x) => x.id === d.id || x.code === d.code);
+                    if (pool_1.db.isDeleted(d.id) || pool_1.db.isDeleted(d.code))
+                        continue;
+                    const idx = store.findIndex((x) => x.id === d.id || x.code.toUpperCase() === d.code.toUpperCase());
                     const item = {
                         id: d.id,
                         code: d.code,
@@ -281,7 +374,7 @@ const getDepartments = async (req, res) => {
         }
     }
     const search = (req.query.search || '').toLowerCase().trim();
-    let depts = pool_1.db.getStore('departments');
+    let depts = pool_1.db.getStore('departments').filter(d => !pool_1.db.isDeleted(d.id) && !pool_1.db.isDeleted(d.code));
     if (search) {
         depts = depts.filter((d) => d.code.toLowerCase().includes(search) || d.name.toLowerCase().includes(search));
     }
@@ -398,7 +491,7 @@ const deleteDepartment = async (req, res) => {
     if (index !== -1) {
         depts.splice(index, 1);
     }
-    pool_1.db.recordDeletion(id, 'DEPARTMENT', { code: dept.code });
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(id, 'DEPARTMENT', { code: dept.code });
     pool_1.db.flush();
     // Remove from Supabase Cloud
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
@@ -423,12 +516,24 @@ const getCourses = async (req, res) => {
     if (sb) {
         try {
             const { data: supaCourses, error } = await sb.from('academic_courses').select('*').order('code');
-            if (!error && supaCourses && supaCourses.length > 0) {
+            if (!error && Array.isArray(supaCourses)) {
                 const depts = pool_1.db.getStore('departments');
                 const coursesStore = pool_1.db.getStore('courses');
+                const supaIds = new Set(supaCourses.map((c) => c.id));
+                const supaCodes = new Set(supaCourses.map((c) => (c.code || '').toUpperCase()));
+                // Purge if deleted in Supabase
+                for (let i = coursesStore.length - 1; i >= 0; i--) {
+                    const item = coursesStore[i];
+                    if (pool_1.db.isDeleted(item.id) || pool_1.db.isDeleted(item.code) || (!supaIds.has(item.id) && !supaCodes.has((item.code || '').toUpperCase()))) {
+                        pool_1.db.recordDeletion(item.id, 'COURSE', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+                        coursesStore.splice(i, 1);
+                    }
+                }
                 for (const c of supaCourses) {
+                    if (pool_1.db.isDeleted(c.id) || pool_1.db.isDeleted(c.code))
+                        continue;
                     const dept = depts.find((d) => d.id === c.department_id || d.code === c.department_id);
-                    const idx = coursesStore.findIndex((x) => x.id === c.id || x.code === c.code);
+                    const idx = coursesStore.findIndex((x) => x.id === c.id || x.code.toUpperCase() === c.code.toUpperCase());
                     const courseItem = {
                         id: c.id,
                         code: c.code,
@@ -453,7 +558,7 @@ const getCourses = async (req, res) => {
     }
     const search = (req.query.search || '').toLowerCase().trim();
     const departmentId = req.query.departmentId;
-    let courses = pool_1.db.getStore('courses');
+    let courses = pool_1.db.getStore('courses').filter(c => !pool_1.db.isDeleted(c.id) && !pool_1.db.isDeleted(c.code));
     const depts = pool_1.db.getStore('departments');
     // Enhance courses with departmentCode if missing
     courses = courses.map((c) => {
@@ -597,7 +702,7 @@ const deleteCourse = async (req, res) => {
     const index = courses.findIndex((c) => c.id === id);
     if (index !== -1)
         courses.splice(index, 1);
-    pool_1.db.recordDeletion(id, 'COURSE', { code: course.code });
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(id, 'COURSE', { code: course.code });
     pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
@@ -635,12 +740,24 @@ const getSubjects = async (req, res) => {
     if (sb) {
         try {
             const { data: supaSubs, error } = await sb.from('subjects').select('*').order('code');
-            if (!error && supaSubs && supaSubs.length > 0) {
+            if (!error && Array.isArray(supaSubs)) {
                 const subsStore = pool_1.db.getStore('subjects');
                 const depts = pool_1.db.getStore('departments');
+                const supaIds = new Set(supaSubs.map((s) => s.id));
+                const supaCodes = new Set(supaSubs.map((s) => (s.code || '').toUpperCase()));
+                // Purge if deleted in Supabase
+                for (let i = subsStore.length - 1; i >= 0; i--) {
+                    const item = subsStore[i];
+                    if (pool_1.db.isDeleted(item.id) || pool_1.db.isDeleted(item.code) || (!supaIds.has(item.id) && !supaCodes.has((item.code || '').toUpperCase()))) {
+                        pool_1.db.recordDeletion(item.id, 'SUBJECT', { code: item.code, reason: 'DELETED_FROM_SUPABASE' });
+                        subsStore.splice(i, 1);
+                    }
+                }
                 for (const s of supaSubs) {
+                    if (pool_1.db.isDeleted(s.id) || pool_1.db.isDeleted(s.code))
+                        continue;
                     const deptObj = depts.find((d) => d.code === s.department || d.id === s.department_id);
-                    const idx = subsStore.findIndex((x) => x.id === s.id || x.code === s.code);
+                    const idx = subsStore.findIndex((x) => x.id === s.id || x.code.toUpperCase() === s.code.toUpperCase());
                     const item = {
                         id: s.id,
                         code: s.code,
@@ -664,7 +781,7 @@ const getSubjects = async (req, res) => {
             console.warn('[Subjects Supabase] Fetch error:', err.message);
         }
     }
-    let subjects = pool_1.db.getStore('subjects');
+    let subjects = pool_1.db.getStore('subjects').filter(s => !pool_1.db.isDeleted(s.id) && !pool_1.db.isDeleted(s.code));
     const depts = pool_1.db.getStore('departments');
     subjects = subjects.map((s) => {
         const d = depts.find((dept) => dept.id === s.departmentId || dept.code === s.departmentCode);
@@ -792,7 +909,7 @@ const deleteSubject = async (req, res) => {
     const index = subjects.findIndex((s) => s.id === id);
     if (index !== -1)
         subjects.splice(index, 1);
-    pool_1.db.recordDeletion(id, 'SUBJECT', { code: subject.code });
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(id, 'SUBJECT', { code: subject.code });
     pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
@@ -814,11 +931,23 @@ const getAcademicYears = async (_req, res) => {
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
-            const { data: supaYears } = await sb.from('academic_years').select('*').order('year_code');
-            if (supaYears && supaYears.length > 0) {
+            const { data: supaYears, error } = await sb.from('academic_years').select('*').order('year_code');
+            if (!error && Array.isArray(supaYears)) {
                 const yearsStore = pool_1.db.getStore('academic_years');
+                const supaIds = new Set(supaYears.map((y) => y.id));
+                const supaCodes = new Set(supaYears.map((y) => (y.year_code || '').toUpperCase()));
+                // Purge if deleted in Supabase
+                for (let i = yearsStore.length - 1; i >= 0; i--) {
+                    const item = yearsStore[i];
+                    if (pool_1.db.isDeleted(item.id) || pool_1.db.isDeleted(item.year) || (!supaIds.has(item.id) && !supaCodes.has((item.year || '').toUpperCase()))) {
+                        pool_1.db.recordDeletion(item.id, 'ACADEMIC_YEAR', { year: item.year, reason: 'DELETED_FROM_SUPABASE' });
+                        yearsStore.splice(i, 1);
+                    }
+                }
                 for (const y of supaYears) {
-                    const idx = yearsStore.findIndex((x) => x.id === y.id || x.year === y.year_code);
+                    if (pool_1.db.isDeleted(y.id) || pool_1.db.isDeleted(y.year_code))
+                        continue;
+                    const idx = yearsStore.findIndex((x) => x.id === y.id || x.year.toUpperCase() === y.year_code.toUpperCase());
                     const item = {
                         id: y.id,
                         year: y.year_code,
@@ -840,7 +969,7 @@ const getAcademicYears = async (_req, res) => {
             console.warn('[Academic Supabase] Fetch years error:', e.message);
         }
     }
-    const years = pool_1.db.getStore('academic_years');
+    const years = pool_1.db.getStore('academic_years').filter(y => !pool_1.db.isDeleted(y.id) && !pool_1.db.isDeleted(y.year));
     return res.json({ success: true, data: years });
 };
 exports.getAcademicYears = getAcademicYears;
@@ -940,7 +1069,7 @@ const deleteAcademicYear = async (req, res) => {
     const index = years.findIndex((item) => item.id === id);
     if (index !== -1)
         years.splice(index, 1);
-    pool_1.db.recordDeletion(id, 'ACADEMIC_YEAR', { year: y.year });
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(id, 'ACADEMIC_YEAR', { year: y.year });
     pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
@@ -1033,14 +1162,14 @@ const deleteSection = async (req, res) => {
     const index = sections.findIndex((s) => s.id === id);
     if (index !== -1)
         sections.splice(index, 1);
-    pool_1.db.recordDeletion(id, 'SECTION', { name: section.name });
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(id, 'SECTION', { name: section.name });
     pool_1.db.flush();
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
             await sb.from('system_settings').upsert({
                 setting_key: 'academic_sections',
-                setting_value: JSON.stringify(sections),
+                setting_value: JSON.stringify(sections.filter(s => !pool_1.db.isDeleted(s.id) && !pool_1.db.isDeleted(s.name))),
                 description: 'Persistent list of institutional sections',
                 updated_at: new Date().toISOString()
             }, { onConflict: 'setting_key' });
@@ -1056,9 +1185,27 @@ exports.deleteSection = deleteSection;
 // 6. Academic Classes CRUD
 // ============================================================================
 const getClasses = async (req, res) => {
-    (0, exports.bootstrapAcademicData)();
+    await (0, exports.bootstrapAcademicData)();
+    const sb = (0, supabaseSyncHelper_1.getSupabase)();
+    if (sb) {
+        try {
+            const { data: supaClasses, error } = await sb.from('academic_classes').select('*').order('name');
+            if (!error && Array.isArray(supaClasses)) {
+                const classesStore = pool_1.db.getStore('classes');
+                const supaClassIds = new Set(supaClasses.map((cl) => cl.id));
+                for (let i = classesStore.length - 1; i >= 0; i--) {
+                    const item = classesStore[i];
+                    if (pool_1.db.isDeleted(item.id) || !supaClassIds.has(item.id)) {
+                        pool_1.db.recordDeletion(item.id, 'CLASS', { name: item.name, reason: 'DELETED_FROM_SUPABASE' });
+                        classesStore.splice(i, 1);
+                    }
+                }
+            }
+        }
+        catch { }
+    }
     const user = req.user;
-    let classes = pool_1.db.getStore('classes');
+    let classes = pool_1.db.getStore('classes').filter(c => !pool_1.db.isDeleted(c.id));
     const courses = pool_1.db.getStore('courses');
     const subjects = pool_1.db.getStore('subjects');
     const users = pool_1.db.getStore('users');
@@ -1307,7 +1454,7 @@ const deleteClass = async (req, res) => {
         return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Class offering not found' });
     }
     pool_1.db.delete('classes', (item) => item.id === id);
-    pool_1.db.recordDeletion(id, 'CLASS', { name: cl.name });
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(id, 'CLASS', { name: cl.name });
     pool_1.db.flush();
     // Cascade delete in-memory class student assignments
     pool_1.db.delete('class_students', (cs) => cs.classId === id);
@@ -1316,7 +1463,7 @@ const deleteClass = async (req, res) => {
         try {
             await sb.from('student_class_assignments').delete().eq('class_id', id);
             await sb.from('academic_classes').delete().eq('id', id);
-            const allClasses = pool_1.db.getStore('classes');
+            const allClasses = pool_1.db.getStore('classes').filter((c) => !pool_1.db.isDeleted(c.id));
             await sb.from('system_settings').upsert({
                 setting_key: 'academic_classes_cache',
                 setting_value: JSON.stringify(allClasses),

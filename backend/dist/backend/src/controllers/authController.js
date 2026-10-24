@@ -103,6 +103,8 @@ const ensureBootstrapInstitutionalUsers = async () => {
     // Hydrate from Supabase Cloud (Strictly skip any permanently deleted users)
     if (sb) {
         try {
+            // 0. Synchronize cloud tombstones first
+            await (0, supabaseSyncHelper_1.syncCloudTombstones)();
             // 1. Hydrate extended cache if available
             const { data: cacheSetting } = await sb
                 .from('system_settings')
@@ -115,7 +117,7 @@ const ensureBootstrapInstitutionalUsers = async () => {
                     if (parsed && Array.isArray(parsed.users)) {
                         const userStore = pool_1.db.getStore('users');
                         for (const u of parsed.users) {
-                            if (pool_1.db.isDeleted(u.id))
+                            if (pool_1.db.isDeleted(u.id) || (u.email && pool_1.db.isDeleted(u.email)))
                                 continue; // Never resurrect permanently deleted users
                             const existing = userStore.find(eu => eu.id === u.id || eu.email.toLowerCase() === u.email.toLowerCase());
                             if (!existing) {
@@ -141,6 +143,8 @@ const ensureBootstrapInstitutionalUsers = async () => {
                     if (parsed && Array.isArray(parsed.students)) {
                         const studentStore = pool_1.db.getStore('students');
                         for (const s of parsed.students) {
+                            if (pool_1.db.isDeleted(s.id) || (s.userId && pool_1.db.isDeleted(s.userId)))
+                                continue;
                             const existingS = studentStore.find(es => es.id === s.id || es.userId === s.userId || es.studentId === s.studentId);
                             if (!existingS) {
                                 studentStore.push(s);
@@ -155,11 +159,31 @@ const ensureBootstrapInstitutionalUsers = async () => {
                     console.warn('[Users Cache] Error parsing extended cache:', e.message);
                 }
             }
-            // 2. Hydrate users table directly
+            // 2. Hydrate users table directly with bidirectional deletion enforcement
             const { data: supaUsers } = await sb.from('users').select('*');
-            if (supaUsers && supaUsers.length > 0) {
+            if (supaUsers) {
                 const store = pool_1.db.getStore('users');
+                const supaUserIds = new Set(supaUsers.map(u => u.id));
+                const supaUserEmails = new Set(supaUsers.map(u => (u.email || '').toLowerCase()));
+                // If a user was deleted directly in Supabase (not in supaUsers list), purge locally
+                if (supaUsers.length > 0) {
+                    const purged = store.filter(u => {
+                        if (u.role === 'ADMIN' && u.email === 'admin@labguard.edu')
+                            return true;
+                        if (pool_1.db.isDeleted(u.id) || (u.email && pool_1.db.isDeleted(u.email)))
+                            return false;
+                        if (!supaUserIds.has(u.id) && !supaUserEmails.has((u.email || '').toLowerCase())) {
+                            pool_1.db.recordDeletion(u.id, 'USER', { email: u.email, reason: 'DELETED_FROM_SUPABASE' });
+                            return false;
+                        }
+                        return true;
+                    });
+                    store.length = 0;
+                    store.push(...purged);
+                }
                 for (const u of supaUsers) {
+                    if (pool_1.db.isDeleted(u.id) || (u.email && pool_1.db.isDeleted(u.email)))
+                        continue;
                     const existing = store.find(eu => eu.id === u.id || eu.email.toLowerCase() === u.email.toLowerCase());
                     const roleName = u.role_id === roleIdMap.ADMIN ? 'ADMIN'
                         : u.role_id === roleIdMap.FACULTY ? 'FACULTY'
@@ -226,55 +250,20 @@ const ensureBootstrapInstitutionalUsers = async () => {
                     }
                 }
             }
-            // 4. Ensure all active accounts in memory are synced into Supabase users and child tables
-            const currentUsers = pool_1.db.getStore('users');
-            for (const localUser of currentUsers) {
+            // 4. Ensure strictly that the primary institutional Admin account is present in Supabase if missing
+            const admin = pool_1.db.findOne('users', (u) => u.role === 'ADMIN' && u.email === 'admin@labguard.edu');
+            if (admin) {
                 await sb.from('users').upsert({
-                    id: localUser.id,
-                    email: localUser.email,
-                    password_hash: localUser.passwordHash,
-                    full_name: localUser.fullName,
-                    role_id: roleIdMap[localUser.role] || roleIdMap.STUDENT,
-                    phone: localUser.phone || null,
-                    is_active: localUser.isActive !== false,
-                    created_at: localUser.createdAt,
-                    updated_at: localUser.updatedAt
+                    id: admin.id,
+                    email: admin.email,
+                    password_hash: admin.passwordHash,
+                    full_name: admin.fullName,
+                    role_id: roleIdMap.ADMIN,
+                    phone: admin.phone || null,
+                    is_active: true,
+                    created_at: admin.createdAt,
+                    updated_at: admin.updatedAt
                 }, { onConflict: 'email' });
-                if (localUser.role === 'STUDENT') {
-                    const studentProfile = pool_1.db.findOne('students', (s) => s.userId === localUser.id);
-                    if (studentProfile) {
-                        await sb.from('students').upsert({
-                            id: studentProfile.id,
-                            user_id: localUser.id,
-                            student_id: studentProfile.studentId,
-                            department: studentProfile.department || 'General',
-                            course: studentProfile.course || 'B.Tech',
-                            year_of_study: studentProfile.yearOfStudy || 3,
-                            semester: studentProfile.semester || 5,
-                            section: studentProfile.section || 'A',
-                            admission_year: 2026,
-                            roll_number: studentProfile.studentId,
-                            created_at: studentProfile.createdAt
-                        }, { onConflict: 'student_id' });
-                    }
-                }
-                else if (localUser.role === 'FACULTY') {
-                    await sb.from('faculty').upsert({
-                        id: localUser.id,
-                        user_id: localUser.id,
-                        employee_id: localUser.identifier || 'FAC-002',
-                        department: localUser.department || 'General',
-                        designation: 'Faculty Member'
-                    }, { onConflict: 'user_id' });
-                }
-                else if (localUser.role === 'LAB_ASSISTANT') {
-                    await sb.from('lab_assistants').upsert({
-                        id: localUser.id,
-                        user_id: localUser.id,
-                        employee_id: localUser.identifier || 'ASST-002',
-                        department: localUser.department || 'General'
-                    }, { onConflict: 'user_id' });
-                }
             }
             await (0, exports.syncExtendedUserCacheToSupabase)();
         }
@@ -771,7 +760,9 @@ const listUsers = async (req, res) => {
     const page = parseInt(req.query.page || '1', 10);
     const limit = parseInt(req.query.limit || '20', 10);
     const students = pool_1.db.getStore('students');
-    let users = pool_1.db.getStore('users').map((u) => {
+    let users = pool_1.db.getStore('users')
+        .filter((u) => !pool_1.db.isDeleted(u.id) && !pool_1.db.isDeleted(u.email))
+        .map((u) => {
         const student = u.role === 'STUDENT' ? students.find((s) => s.userId === u.id) : null;
         return {
             id: u.id,
@@ -861,9 +852,8 @@ const deleteUser = async (req, res) => {
     pool_1.db.delete('students', (s) => s.userId === userId);
     // Delete user account
     pool_1.db.delete('users', (u) => u.id === userId);
-    // Record permanent tombstone so user cannot be resurrected by background sync
-    pool_1.db.recordDeletion(userId, 'USER', { email: user.email, identifier: user.identifier });
-    pool_1.db.flush();
+    // Record permanent tombstone locally & in Supabase cloud so user cannot be resurrected by background sync
+    await (0, supabaseSyncHelper_1.recordCloudDeletion)(userId, 'USER', { email: user.email, identifier: user.identifier });
     const sb = (0, supabaseSyncHelper_1.getSupabase)();
     if (sb) {
         try {
